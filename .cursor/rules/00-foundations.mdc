@@ -1,0 +1,27 @@
+---
+description: "Always-on guardrails: small diffs, tests-first, high-signal commits, safe refactors."
+globs: ["**/*"]
+---
+## Core workflow
+- Prefer **small PRs** with a single responsibility. Always include/update tests with any code change.
+- Default to **TDD-ish**: write/adjust failing test, implement minimal code, then refactor.
+- Keep **clean diffs**: format + lint before commit; avoid unrelated changes.
+- **Maintain line coverage ≥ 0.95 (project default). If a change would drop coverage, add tests or justify in the PR.**
+- **Aim for ≤ 400 changed LOC per PR (excluding vendored/formatting). Split work otherwise.**
+
+## Commits & PRs
+- Use **Conventional Commits** (`feat:`, `fix:`, `docs:`, `chore:`). Summaries ≤ 72 chars.
+- Each PR must state: *purpose, approach, alternatives considered, tests added, risk*.
+- Link issues in PR description; auto-close keywords (e.g., "Fixes #123").
+- **Use Conventional Commits; breaking changes must include `!` and a migration note.**
+- **If risk > low, add a short rollback plan in the PR body.**
+
+## Design principles to bias toward
+- "12-Factor" app hygiene (explicit deps, config via env, parity dev/prod).
+- Test Pyramid: many unit tests, fewer integration, few E2E; fast + reliable.
+- Record significant tradeoffs as **ADRs** (Context → Decision → Consequences).
+- **Config lives in env (12-Factor "Config"). Never hardcode secrets.**
+
+## What NOT to do
+- No merging to `main` without green CI + required reviews.
+- No committing secrets or tokens—ever. If generated, store as env/CI secrets.

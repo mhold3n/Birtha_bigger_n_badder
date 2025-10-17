@@ -1,0 +1,16 @@
+name: "🐛 Bug report"
+description: Report a reproducible bug
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Steps to reproduce, expected vs actual
+    validations: { required: true }
+  - type: input
+    id: version
+    attributes:
+      label: Version/commit
+  - type: textarea
+    id: logs
+    attributes: { label: Logs/error, render: shell }

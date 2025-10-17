@@ -1,0 +1,50 @@
+version: "3.9"
+
+services:
+  vllm:
+    image: vllm/vllm-openai:latest
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: [gpu]
+              count: 1
+    environment:
+      - HF_TOKEN=${HF_TOKEN:-}
+      - CUDA_VISIBLE_DEVICES=0
+    command:
+      [
+        "--model", "mistralai/Mistral-7B-Instruct-v0.3",
+        "--dtype", "float16",
+        "--max-model-len", "8192",
+        "--gpu-memory-utilization", "0.92",
+        "--enable-prefix-caching",
+        "--host", "0.0.0.0",
+        "--port", "8000"
+      ]
+    ports:
+      - "${WORKER_VLLM_PORT:-8000}:8000"
+    runtime: nvidia
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "${WORKER_PROXY_PORT:-8443}:8443"
+    volumes:
+      - ./infra/reverse-proxy/Caddyfile.worker:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - vllm
+    restart: unless-stopped
+
+volumes:
+  caddy_data:
+  caddy_config:

@@ -1,0 +1,23 @@
+---
+description: "CI, branch protection, secret hygiene: required checks, CodeQL, Dependabot, pre-commit."
+globs: [".github/workflows/*.yml", ".pre-commit-config.yaml", "CODEOWNERS", ".github/**"]
+---
+## Always require before merge
+- All status checks green: lint, type, tests, coverage threshold.
+- ≥1 approving review (CODEOWNERS auto-assigned).
+- Branch up-to-date and protected (no direct pushes to main).
+
+**Required checks (GitHub Settings → Branch protection)**  
+`ci / build-test (ubuntu-latest, py3.11,node20)`  
+`code scanning results / CodeQL`  
+`secrets-scan / gitleaks`  
+`coverage / threshold-0.95`
+
+## Security defaults
+- Enable **Secret Scanning** + **Push Protection**; treat findings as merge blockers.
+- Run **CodeQL** on PRs (languages auto-detected or explicitly configured).
+- Use **Dependabot** weekly for all ecosystems present.
+- **If CodeQL/secret scans fail, block merge and reference the failing alert in the PR with remediation steps.**
+
+## Hooks
+- Use `pre-commit` to run ruff/black/mypy (Python) + secrets scan (gitleaks/trufflehog) before commit/push.

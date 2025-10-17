@@ -1,0 +1,11 @@
+---
+description: "Docs and Decision Records: keep README, CHANGELOG, and ADRs current."
+globs: ["README.md", "docs/**", "CHANGELOG.md"]
+---
+## Rules
+- Update README with setup, scripts, env vars, and runbook notes for new features.
+- Maintain **ADRs** in `docs/adr/` for architectural tradeoffs; link from PRs.
+- Keep CHANGELOG human-readable; tie entries to PRs/releases.
+- **ADR naming**: `docs/adr/NNNN-<slug>.md`
+- **README must include**: Quickstart, Scripts, Env Vars, Runbook (deploy/rollback), Support/Ownership.
+- **On architecture changes**: write an ADR and link it in the PR body.

@@ -1,0 +1,143 @@
+# Caddyfile for server (control plane)
+# Routes API, router, Grafana, Prometheus with internal TLS and IP allowlists
+
+{
+    # Global options
+    auto_https off
+    log {
+        output stdout
+        format json
+        level INFO
+    }
+}
+
+# Internal API endpoints (LAN only)
+:443 {
+    # Enable compression
+    encode zstd gzip
+
+    # IP allowlist for internal access
+    @internal {
+        remote_ip 10.0.0.0/8 192.168.0.0/16 172.16.0.0/12
+    }
+
+    # API service
+    handle_path /api* {
+        reverse_proxy api:8080 {
+            header_up Host {host}
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+        }
+    }
+
+    # Router service
+    handle_path /router* {
+        reverse_proxy router:8000 {
+            header_up Host {host}
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+        }
+    }
+
+    # Grafana dashboard
+    handle_path /grafana* {
+        reverse_proxy grafana:3000 {
+            header_up Host {host}
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+        }
+    }
+
+    # Prometheus metrics
+    handle_path /prometheus* {
+        reverse_proxy prometheus:9090 {
+            header_up Host {host}
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+        }
+    }
+
+    # MCP servers
+    handle_path /mcp/github* {
+        reverse_proxy mcp-github:7000 {
+            header_up Host {host}
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+        }
+    }
+
+    handle_path /mcp/filesystem* {
+        reverse_proxy mcp-filesystem:7001 {
+            header_up Host {host}
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+        }
+    }
+
+    handle_path /mcp/secrets* {
+        reverse_proxy mcp-secrets:7002 {
+            header_up Host {host}
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+        }
+    }
+
+    handle_path /mcp/vector-db* {
+        reverse_proxy mcp-vector-db:7003 {
+            header_up Host {host}
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+        }
+    }
+
+    # Pi-hole admin interface
+    handle_path /pihole* {
+        reverse_proxy pihole:80 {
+            header_up Host {host}
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+        }
+    }
+
+    # Health check endpoint
+    handle /health {
+        respond "OK" 200
+    }
+
+    # Default response for allowed IPs
+    handle @internal {
+        respond "Agent Orchestrator Control Plane" 200
+    }
+
+    # Block external access
+    handle {
+        respond "Forbidden" 403
+    }
+
+    # Use internal TLS
+    tls internal
+}
+
+# HTTP redirect to HTTPS
+:80 {
+    @internal {
+        remote_ip 10.0.0.0/8 192.168.0.0/16 172.16.0.0/12
+    }
+
+    handle @internal {
+        redir https://{host}{uri} permanent
+    }
+
+    handle {
+        respond "Forbidden" 403
+    }
+}

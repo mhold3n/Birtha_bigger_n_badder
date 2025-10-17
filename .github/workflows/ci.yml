@@ -1,0 +1,109 @@
+name: CI
+on:
+  pull_request:
+  push:
+    branches: [ main ]
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.11"]
+        node: ["20"]
+    steps:
+      - uses: actions/checkout@v4
+
+      # Python services
+      - uses: actions/setup-python@v5
+        with: { python-version: ${{ matrix.python }} }
+      - run: python -m pip install --upgrade pip
+      
+      # Install dependencies for each service
+      - name: Install API dependencies
+        run: |
+          cd services/api
+          pip install -e .
+          pip install -e ".[dev]"
+      
+      - name: Install Router dependencies
+        run: |
+          cd services/router
+          pip install -e .
+          pip install -e ".[dev]"
+      
+      - name: Install Worker Client dependencies
+        run: |
+          cd services/worker_client
+          pip install -e .
+          pip install -e ".[dev]"
+      
+      - name: Install MCP server dependencies
+        run: |
+          cd mcp/servers/filesystem-mcp
+          pip install -e .
+          pip install -e ".[dev]"
+          cd ../secrets-mcp
+          pip install -e .
+          pip install -e ".[dev]"
+          cd ../vector-db-mcp
+          pip install -e .
+          pip install -e ".[dev]"
+
+      # Run linting and type checking
+      - name: Run linting
+        run: |
+          ruff check services/ mcp/servers/
+          black --check services/ mcp/servers/
+      
+      - name: Run type checking
+        run: |
+          mypy --strict services/api/src services/router/src services/worker_client/src
+          mypy --strict mcp/servers/filesystem-mcp/src mcp/servers/secrets-mcp/src mcp/servers/vector-db-mcp/src
+      
+      # Run tests
+      - name: Run tests
+        run: |
+          pytest services/api/tests/ -v --cov=services/api/src --cov-report=xml
+          pytest services/router/tests/ -v --cov=services/router/src --cov-report=xml
+          pytest services/worker_client/tests/ -v --cov=services/worker_client/src --cov-report=xml
+          pytest mcp/servers/filesystem-mcp/tests/ -v --cov=mcp/servers/filesystem-mcp/src --cov-report=xml
+          pytest mcp/servers/secrets-mcp/tests/ -v --cov=mcp/servers/secrets-mcp/src --cov-report=xml
+          pytest mcp/servers/vector-db-mcp/tests/ -v --cov=mcp/servers/vector-db-mcp/src --cov-report=xml
+
+      # Node.js for GitHub MCP server
+      - uses: actions/setup-node@v4
+        with: { node-version: ${{ matrix.node }} }
+      - name: Install GitHub MCP dependencies
+        run: |
+          cd mcp/servers/github-mcp
+          npm ci
+      - name: Build GitHub MCP server
+        run: |
+          cd mcp/servers/github-mcp
+          npm run build
+      - name: Run GitHub MCP tests
+        run: |
+          cd mcp/servers/github-mcp
+          npm test
+
+      # Build Docker images
+      - name: Build Docker images
+        run: |
+          docker build -t agent-orchestrator-api ./services/api
+          docker build -t agent-orchestrator-router ./services/router
+          docker build -t agent-orchestrator-worker-client ./services/worker_client
+          docker build -t mcp-filesystem ./mcp/servers/filesystem-mcp
+          docker build -t mcp-secrets ./mcp/servers/secrets-mcp
+          docker build -t mcp-vector-db ./mcp/servers/vector-db-mcp
+          docker build -t mcp-github ./mcp/servers/github-mcp
+
+      # Upload coverage
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./services/api/coverage.xml,./services/router/coverage.xml,./services/worker_client/coverage.xml
+          fail_ci_if_error: false
+
+  codeql:
+    uses: github/codeql-action/.github/workflows/codeql.yml@v3

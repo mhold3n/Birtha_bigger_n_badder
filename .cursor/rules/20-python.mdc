@@ -1,0 +1,19 @@
+---
+description: "Python: pytest + mypy(strict) + ruff + black; predictable env and reproducible builds."
+globs: ["packages/*/src/**/*.py", "packages/*/tests/**/*.py", "**/pyproject.toml", "**/requirements*.txt"]
+---
+## Expectations
+- Add **pytest** unit tests for new code; focus on pure functions where possible.
+- Enforce typing with **mypy --strict**. No ignored errors unless justified inline.
+- Run **ruff** (lint) and **black** (format) before committing.
+- Prefer dependency pins and lockfiles; fail fast on resolver conflicts.
+
+## Minimal scripts
+- Test: `pytest -q --maxfail=1 --disable-warnings --cov=src --cov-report=xml`
+- Type: `mypy --strict src tests`
+- Lint: `ruff check . && black --check .`
+- Fix: `ruff check --fix . && black .`
+
+## Test strategy
+- Unit tests dominate; a smaller set of integration tests for IO/boundary layers.
+- Keep fixtures lean; use factories; avoid network in unit tests (mock).

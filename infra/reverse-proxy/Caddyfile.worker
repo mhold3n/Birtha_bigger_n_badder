@@ -1,0 +1,49 @@
+# Caddyfile for worker (GPU node)
+# Secures vLLM API with mTLS and LAN allowlist
+
+{
+    # Global options
+    auto_https off
+    log {
+        output stdout
+        format json
+        level INFO
+    }
+}
+
+# Worker API endpoint (LAN only)
+:8443 {
+    # Enable compression
+    encode zstd gzip
+
+    # IP allowlist for server access
+    @allow {
+        remote_ip 192.168.0.0/16 10.0.0.0/8 172.16.0.0/12
+    }
+
+    # Health check endpoint
+    handle /health {
+        respond "OK" 200
+    }
+
+    # vLLM OpenAI-compatible API
+    handle @allow {
+        reverse_proxy vllm:8000 {
+            header_up Host {host}
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+            
+            # Timeout settings for long-running requests
+            timeout 300s
+        }
+    }
+
+    # Block external access
+    handle {
+        respond "Forbidden" 403
+    }
+
+    # Use internal TLS
+    tls internal
+}

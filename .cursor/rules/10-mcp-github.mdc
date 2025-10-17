@@ -1,0 +1,29 @@
+---
+description: "Use the GitHub MCP server tools instead of manual API wrangling."
+globs: ["**/*"]
+---
+
+## USE WHEN (GitHub MCP)
+- **Browsing repo state**: branches, tags, files, blame → *use MCP repo/code tools*.
+- **Work tracking**: create/triage issues with acceptance criteria; link PRs ↔ issues.
+- **PR workflow**: open draft PR early; request CODEOWNERS; post CI/CodeQL summaries.
+- **Security**: never print tokens; use OAuth to `https://api.githubcopilot.com/mcp/` or an org MCP Registry; store secrets in repo/Org settings only.
+- **If MCP is unavailable**: ask to enable "GitHub MCP Server" from GitHub's docs, then proceed with local edits.
+
+## When MCP tools are available, the assistant should:
+- **Explore code & repo**
+  - Prefer MCP repo/code tools to search files, list branches/tags, and fetch contents instead of writing ad-hoc scripts.
+- **Plan & track work**
+  - Open issues with clear acceptance criteria and labels; cross-link related issues/PRs.
+- **Automate feedback loops**
+  - Create draft PRs early; request reviewers from CODEOWNERS.
+  - Trigger CI workflows via MCP Actions tooling when supported.
+  - Surface Code Scanning/Dependabot findings in PR comments and propose fixes.
+- **Safety**
+  - Use **fine-grained PATs with least privilege**; never print secrets. If a token/path is requested, instruct to use GitHub Secrets and branch protection.
+
+## PR Acceptance Checklist
+- [ ] Tests added/updated; **coverage ≥ 0.95**
+- [ ] CI **lint + type + unit + (integ if touched)** green
+- [ ] **CodeQL & Secret Scanning** green
+- [ ] Docs/ADR updated if architecture changed

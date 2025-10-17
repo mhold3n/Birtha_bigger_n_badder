@@ -1,0 +1,12 @@
+---
+description: "JS/TS: eslint + prettier + tsc --noEmit + unit tests (vitest/jest), optional Playwright E2E."
+globs: ["packages/**/*.{js,jsx,ts,tsx}", "packages/*/package.json", "packages/*/tsconfig*.json"]
+---
+## Expectations
+- **TypeScript**: `tsc --noEmit` must pass; no `any` unless justified.
+- **ESLint** + **Prettier** must pass prior to commit.
+- Tests: **vitest** or **jest** for units; small E2E slice via **Playwright** if applicable.
+- Keep node scripts for `lint`, `test`, `build`, `typecheck`, `format`, `format:fix`.
+- **Required package.json scripts**: `lint`, `test`, `typecheck`, `format`, `format:fix`.
+- **TypeScript target**: `tsc --noEmit` must pass with `noImplicitAny: true`.
+- **Unit tests**: `vitest run` (or `jest --ci`).
