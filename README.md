@@ -8,6 +8,28 @@
 - **Workstation (RTX 4070 Ti):** vLLM/Ollama LLM runners in Docker with `nvidia-container-toolkit`, exposed only to the server via LAN/mTLS.
 - **Dev flow:** Remote dev via VS Code Dev Containers → CI builds → Deploy to server → Server routes AI requests to WrkHrs services → WrkHrs orchestrator routes LLM inference to GPU worker.
 
+## Project Management
+
+This project uses GitHub Projects for task tracking and project management.
+
+- **Project Board**: https://github.com/users/mhold3n/projects/3
+- **Issue Templates**: Available in `.github/ISSUE_TEMPLATE/`
+- **Automation**: Configured via `.github/workflows/project-automation.yml`
+
+### Creating Issues
+
+Use the appropriate issue template:
+- **WrkHrs Features**: Use `feature-wrkhrs.md` template
+- **MCP Servers**: Use `mcp-server.md` template  
+- **Observability**: Use `observability.md` template
+
+### Project Views
+
+- **Backlog**: All open issues with `wrkhrs-convergence` label
+- **In Progress**: Assigned issues currently being worked on
+- **Done**: Completed issues
+- **Blocked**: Issues that are blocked or waiting for dependencies
+
 ## Quickstart
 
 ### 0) Prerequisites
