@@ -16,7 +16,8 @@ jobs:
 
       # Python services
       - uses: actions/setup-python@v5
-        with: { python-version: ${{ matrix.python }} }
+        with:
+          python-version: ${{ matrix.python }}
       - run: python -m pip install --upgrade pip
       
       # Install dependencies for each service
