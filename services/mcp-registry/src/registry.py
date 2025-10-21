@@ -329,6 +329,70 @@ async def register_server(server: MCPServer) -> MCPServer:
         raise HTTPException(status_code=500, detail=f"Failed to register server: {str(e)}")
 
 
+@app.get("/mcp/servers")
+async def get_servers() -> Dict[str, Any]:
+    """Get MCP servers for UI controls.
+    
+    Returns:
+        Server list with UI-friendly format
+    """
+    servers = []
+    for name, server in registry.servers.items():
+        server_info = {
+            "name": server.name,
+            "type": server.type,
+            "description": server.description,
+            "version": server.version,
+            "url": server.url,
+            "health_url": server.health_url,
+            "status": "healthy",  # TODO: Check actual health
+            "tools_count": len(server.tools),
+            "resources_count": len(server.resources),
+            "last_seen": server.last_seen.isoformat() if server.last_seen else None,
+        }
+        servers.append(server_info)
+    
+    return {"servers": servers}
+
+
+@app.get("/mcp/servers/{name}/schema")
+async def get_server_schema(name: str) -> Dict[str, Any]:
+    """Get server schema for UI generation.
+    
+    Args:
+        name: Server name
+        
+    Returns:
+        Server schema
+    """
+    server = registry.servers.get(name)
+    if not server:
+        raise HTTPException(status_code=404, detail=f"Server '{name}' not found")
+    
+    schema = {
+        "name": server.name,
+        "type": server.type,
+        "tools": [
+            {
+                "name": tool.name,
+                "description": tool.description,
+                "schema": tool.schema,
+            }
+            for tool in server.tools
+        ],
+        "resources": [
+            {
+                "name": resource.name,
+                "description": resource.description,
+                "mime_type": resource.mime_type,
+            }
+            for resource in server.resources
+        ],
+    }
+    
+    return schema
+
+
 @app.get("/mcp/registry/stats")
 async def get_registry_stats() -> Dict[str, Any]:
     """Get registry statistics.

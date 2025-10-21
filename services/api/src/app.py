@@ -20,6 +20,7 @@ from .config import settings
 from .observability.context import RequestContextMiddleware, get_request_context
 from .observability.trace import get_trace_context
 from .observability.mlflow_logger import MLflowLogger
+from .observability.provenance import ProvenanceLogger
 from .policies.middleware import policy_enforcer
 
 # Routers (scaffolded control plane API)
@@ -86,6 +87,7 @@ CHAT_DURATION = Histogram(
 redis_client: Optional[Redis] = None
 openai_client: Optional[AsyncOpenAI] = None
 mlflow_logger: Optional[MLflowLogger] = None
+provenance_logger: Optional[ProvenanceLogger] = None
 
 app = FastAPI(
     title="Agent Orchestrator API",
@@ -191,7 +193,7 @@ async def metrics_middleware(request: Request, call_next):
 @app.on_event("startup")
 async def startup_event():
     """Initialize clients on startup."""
-    global redis_client, openai_client, mlflow_logger
+    global redis_client, openai_client, mlflow_logger, provenance_logger
     
     logger.info("Starting Agent Orchestrator API", version="0.1.0")
     
@@ -215,6 +217,15 @@ async def startup_event():
     except Exception as e:
         logger.error("Failed to initialize MLflow logger", error=str(e))
         mlflow_logger = None
+    
+    # Initialize provenance logger
+    try:
+        if mlflow_logger:
+            provenance_logger = ProvenanceLogger(mlflow_logger)
+            logger.info("Provenance logger initialized")
+    except Exception as e:
+        logger.error("Failed to initialize provenance logger", error=str(e))
+        provenance_logger = None
     
     # Initialize Redis client
     try:
@@ -429,6 +440,58 @@ async def chat_completions(request: ChatRequest, http_request: Request):
         )
         
         raise HTTPException(status_code=500, detail=f"Chat request failed: {str(e)}")
+
+
+class FeedbackRequest(BaseModel):
+    """Feedback request model."""
+    
+    run_id: str = Field(..., description="MLflow run ID")
+    rating: int = Field(..., ge=1, le=5, description="User rating (1-5)")
+    reasons: List[str] = Field(default_factory=list, description="Feedback reasons")
+    notes: Optional[str] = Field(default=None, description="Additional notes")
+
+
+@app.post("/v1/feedback")
+async def submit_feedback(feedback: FeedbackRequest):
+    """Submit feedback for a run.
+    
+    Args:
+        feedback: Feedback request with run_id, rating, reasons, notes
+        
+    Returns:
+        Feedback submission result
+    """
+    try:
+        if not provenance_logger:
+            raise HTTPException(
+                status_code=503,
+                detail="Provenance logger not available",
+            )
+        
+        # Log feedback to MLflow and feedback.jsonl
+        provenance_logger.log_feedback(
+            run_id=feedback.run_id,
+            rating=feedback.rating,
+            reasons=feedback.reasons,
+            notes=feedback.notes,
+        )
+        
+        logger.info(
+            "Feedback submitted",
+            run_id=feedback.run_id,
+            rating=feedback.rating,
+            reasons=feedback.reasons,
+        )
+        
+        return {
+            "status": "success",
+            "message": "Feedback submitted successfully",
+            "run_id": feedback.run_id,
+        }
+        
+    except Exception as e:
+        logger.error("Failed to submit feedback", error=str(e))
+        raise HTTPException(status_code=500, detail=f"Failed to submit feedback: {str(e)}")
 
 
 @app.get("/")
