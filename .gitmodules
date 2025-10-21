@@ -1,0 +1,3 @@
+[submodule "services/wrkhrs"]
+	path = services/wrkhrs
+	url = https://github.com/mhold3n/WrkHrs.git

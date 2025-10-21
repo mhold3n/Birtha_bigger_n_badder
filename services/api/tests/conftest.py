@@ -66,7 +66,7 @@ def mock_openai_client() -> AsyncMock:
 
 @pytest.fixture
 async def setup_clients(
-    mock_redis: AsyncMock, mock_openai_client: AsyncMock
+    mock_redis: AsyncMock, mock_openai_client: AsyncMock, test_client: TestClient
 ) -> AsyncGenerator[None, None]:
     """Setup mock clients for testing."""
     import src.app
@@ -75,7 +75,7 @@ async def setup_clients(
     original_redis = src.app.redis_client
     original_openai = src.app.openai_client
     
-    # Set mock clients
+    # Set mock clients (after TestClient startup ran)
     src.app.redis_client = mock_redis
     src.app.openai_client = mock_openai_client
     

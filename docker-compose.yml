@@ -5,6 +5,7 @@ services:
   api:
     build:
       context: ./services/api
+    user: root
     environment:
       - OPENAI_BASE_URL=${OPENAI_BASE_URL}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
@@ -27,8 +28,11 @@ services:
   router:
     build:
       context: ./services/router
+    user: root
     volumes:
       - ./services/router:/app
+    ports:
+      - "8000:8000"
     environment:
       - API_URL=http://api:8080
       - REDIS_URL=redis://queue:6379

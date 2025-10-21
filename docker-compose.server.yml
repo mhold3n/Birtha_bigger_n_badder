@@ -1,14 +1,17 @@
 version: "3.9"
 
 services:
+  api:
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
   # Reverse proxy to expose server API + secure worker ingress
   caddy:
     image: caddy:2-alpine
     ports:
-      - "443:443"
-      - "80:80"
+      - "8443:443"
     volumes:
       - ./infra/reverse-proxy/Caddyfile.server:/etc/caddy/Caddyfile:ro
+      - ./infra/reverse-proxy/Caddyfile.lan:/etc/caddy/Caddyfile.lan:ro
       - caddy_data:/data
       - caddy_config:/config
     depends_on:
@@ -28,10 +31,16 @@ services:
       - WEBPASSWORD=${PIHOLE_PASSWORD:-admin}
       - DNS1=${PIHOLE_UPSTREAM_DNS:-1.1.1.1}
       - DNS2=8.8.8.8
+      - DNSMASQ_LISTENING=all
+      - PIHOLE_DNS_1=1.1.1.1
+      - PIHOLE_DNS_2=1.0.0.1
+      - ServerIP=192.168.50.107
+      - FTLCONF_dns_listeningMode=ALL
     volumes:
       - pihole_data:/etc/pihole
       - pihole_dnsmasq:/etc/dnsmasq.d
       - ./infra/dns/pihole/custom.list:/etc/pihole/custom.list:ro
+      - ./infra/dns/pihole/local-dns.conf:/etc/dnsmasq.d/99-local-dns.conf:ro
     cap_add:
       - NET_ADMIN
     restart: unless-stopped
@@ -77,6 +86,8 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./:/workspace:ro
+      - /mnt/appdata/addons/documents:/mnt/appdata/addons/documents:ro
+      - /mnt/appdata/addons/documents_processed:/mnt/appdata/addons/documents_processed:ro
     ports:
       - "7001:7001"
     restart: unless-stopped
@@ -113,7 +124,7 @@ services:
 
   # Vault for secrets management
   vault:
-    image: vault:latest
+    image: hashicorp/vault:latest
     ports:
       - "8200:8200"
     environment:
@@ -123,9 +134,46 @@ services:
       - IPC_LOCK
     restart: unless-stopped
 
+  # Homarr dashboard
+  homarr:
+    image: ghcr.io/ajnart/homarr:latest
+    ports:
+      - "7576:7575"
+    environment:
+      - TZ=UTC
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./infra/homarr/configs:/app/data/configs
+      - ./infra/homarr/icons:/app/public/icons
+      - homarr_data:/data
+    depends_on:
+      - api
+      - router
+      - prometheus
+      - grafana
+    restart: unless-stopped
+
+  # Node Exporter for host metrics (matches Prometheus job 'node-exporter')
+  node-exporter:
+    image: prom/node-exporter:latest
+    ports:
+      - "9100:9100"
+    pid: host
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--path.rootfs=/rootfs'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+    restart: unless-stopped
+
 volumes:
   caddy_data:
   caddy_config:
   pihole_data:
   pihole_dnsmasq:
   qdrant_data:
+  homarr_data:

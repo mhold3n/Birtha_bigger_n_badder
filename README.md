@@ -1,12 +1,12 @@
-# Agent Orchestrator
+# Birtha + WrkHrs AI Platform
 
-**Goal:** Run all development and orchestration on a **server** (Proxmox VMs/LXCs), while a **workstation** with an RTX 4070 Ti hosts the **GPU worker** (e.g., vLLM/OpenAI-compatible API). All developers (Win/Mac/Linux) enter through the **server**.
+**Goal:** A unified AI orchestration platform combining Birtha's robust infrastructure with WrkHrs's specialized AI services. The platform runs on a **server** (Proxmox VMs/LXCs) with CPU-based orchestration, while a **workstation** with an RTX 4070 Ti hosts the **GPU worker** for LLM inference. All developers (Win/Mac/Linux) enter through the **server**.
 
 ## High-level Architecture
 
-- **Server stack (Proxmox VM/LXC):** API (FastAPI), router/agent, MCP servers, queue (Redis), reverse proxy (Caddy), observability (Prometheus, Grafana), and optional security (Fail2ban/CrowdSec), DNS/ad-blocker (Pi-hole/AdGuard) if desired.
-- **Workstation (RTX 4070 Ti):** vLLM (or TGI) in Docker with `nvidia-container-toolkit`, exposed only to the server via LAN/mTLS.
-- **Dev flow:** Remote dev via VS Code Dev Containers → CI builds → Deploy to server → Server routes inference to the GPU worker.
+- **Server stack (Proxmox VM/LXC):** Birtha API (FastAPI), router/agent, WrkHrs AI services (gateway, orchestrator, RAG, ASR, tool-registry, MCP), MCP servers, queue (Redis), reverse proxy (Caddy), observability (MLflow, Prometheus, Grafana, Loki, Tempo), and optional security (Fail2ban/CrowdSec), DNS/ad-blocker (Pi-hole/AdGuard) if desired.
+- **Workstation (RTX 4070 Ti):** vLLM/Ollama LLM runners in Docker with `nvidia-container-toolkit`, exposed only to the server via LAN/mTLS.
+- **Dev flow:** Remote dev via VS Code Dev Containers → CI builds → Deploy to server → Server routes AI requests to WrkHrs services → WrkHrs orchestrator routes LLM inference to GPU worker.
 
 ## Quickstart
 
@@ -24,36 +24,86 @@ cp .env.example .env
 ### 2) Start server stack (control plane)
 
 ```bash
-# local/dev
-docker compose up -d
+# Platform services (MLflow, observability)
+make platform-up
 
-# server (uses overrides)
-docker compose -f docker-compose.yml -f docker-compose.server.yml up -d
+# AI stack (WrkHrs services)
+make ai-up
+
+# Full server deployment (platform + AI + server)
+make server-up
+
+# addons (security/search/media/etc.)
+docker compose -f docker-compose.addons.yml up -d
+
+# or bring everything up
+make up-all
 ```
 
 ### 3) Start GPU worker on workstation
 
 ```bash
-docker compose -f docker-compose.worker.yml up -d
+# Start GPU worker
+make worker-up
+
+# Or start with Ollama instead of vLLM
+docker compose -f docker-compose.worker.yml --profile ollama up -d
 ```
 
 ### 4) Test
 
 ```bash
-# From server: call the worker via gateway or direct vLLM
+# Health check all services
+make health
+
+# Test WrkHrs gateway
+curl -s http://localhost:8080/health
+
+# Test LLM inference via worker
 curl -s https://worker.local:8443/v1/models
+
+# Test MLflow UI
+open http://localhost:5000
 ```
 
 ### 5) Dev UX
 
 * All devs SSH or VS Code Remote into the **server**.
-* The server exposes a unified API. Internal services call the **worker** via OpenAI-compatible endpoints.
+* The server exposes a unified API through Birtha's API and Router services.
+* WrkHrs AI services handle domain classification, request conditioning, and AI orchestration.
+* Internal services call the **worker** via OpenAI-compatible endpoints for LLM inference.
 * MCP servers are configured in `mcp/config/mcp_servers.yaml`.
+* MLflow provides experiment tracking and model registry for all AI operations.
+
+## WrkHrs AI Stack Integration
+
+### AI Services Architecture
+- **WrkHrs Gateway**: Main API gateway for AI requests with domain classification and request conditioning
+- **WrkHrs Orchestrator**: Task orchestration and workflow management using LangChain/LangGraph
+- **WrkHrs RAG**: Retrieval-augmented generation with Qdrant vector database
+- **WrkHrs ASR**: Automatic speech recognition with Whisper integration
+- **WrkHrs Tool Registry**: Tool discovery and registration for MCP integration
+- **WrkHrs MCP**: Micro-capability platform service for tool and resource management
+
+### Policy Enforcement
+- **Evidence Policy**: Requires citations and evidence in AI responses
+- **Citation Policy**: Validates citation quality and format
+- **Hedging Policy**: Detects and flags hedging language
+- **Units Policy**: Normalizes and validates SI units
+- **Policy Registry**: Dynamic policy discovery and validation
+
+### Observability & Provenance
+- **MLflow**: Experiment tracking, model registry, and artifact storage
+- **OpenTelemetry**: Distributed tracing with Tempo integration
+- **Prometheus**: Metrics collection and monitoring
+- **Grafana**: Dashboards and visualization
+- **Loki**: Log aggregation and analysis
 
 ## Models & Sizing
 
 * Default assumes models fit in **12 GB** (e.g., 7–13B, FP16 or low-bit). Use vLLM paged attention & quantization for longer contexts.
 * When models outgrow 12 GB: consider quantized variants or re-evaluate GPU topology.
+* WrkHrs supports both vLLM and Ollama backends for LLM inference.
 
 ## MCP Hybrid Architecture
 
@@ -70,8 +120,10 @@ This system implements a hybrid MCP (Model Context Protocol) architecture:
 | **Ops overhead**             | Lower (one place to patch/observe)                                                       | Higher (N stacks), but automated with templates                              |
 
 ### Global MCP Servers (Control Plane)
-- **GitHub MCP**: Repository operations, issue tracking, pull requests
+- **GitHub MCP**: Repository operations, issue tracking, pull requests, GitHub Projects integration
 - **Filesystem MCP**: File operations, code analysis, dependency tracking
+- **Code Resources MCP**: Indexed codebase datasets with embeddings for code search
+- **Document Resources MCP**: PDF/textbook datasets with chunking for document search
 - **Secrets MCP**: Secure secrets management with Vault integration
 - **Vector DB MCP**: Embedding search, knowledge retrieval
 
@@ -82,9 +134,13 @@ This system implements a hybrid MCP (Model Context Protocol) architecture:
 
 ## Observability
 
-* Prometheus scrapes vLLM and system metrics.
-* Grafana dashboards: `infra/observability/grafana/dashboards`.
-* Comprehensive alerting for service health, performance, and resource usage.
+* **MLflow**: Experiment tracking, model registry, and artifact storage for all AI operations
+* **Prometheus**: Scrapes vLLM, WrkHrs services, and system metrics
+* **Grafana**: Dashboards for service health, performance, and resource usage
+* **Loki**: Log aggregation and analysis for all services
+* **Tempo**: Distributed tracing for request flow analysis
+* **Jaeger**: Trace visualization and analysis
+* Comprehensive alerting for service health, performance, and resource usage
 
 ## Security
 
@@ -106,19 +162,42 @@ See `deploy/server/provision_proxmox.md` for VM/LXC creation, cloud-init, and ne
 ## Makefile Commands
 
 ```bash
+# Platform services (MLflow, observability)
+make platform-up    # Start platform services
+make platform-down   # Stop platform services
+make logs-platform   # View platform logs
+
+# AI stack (WrkHrs services)
+make ai-up           # Start AI stack services
+make ai-down         # Stop AI stack services
+make logs-ai         # View AI stack logs
+
+# Full server deployment (platform + AI + server)
+make server-up       # Start full server stack
+make server-down     # Stop full server stack
+make logs-server-full # View full server logs
+
+# Worker deployment
+make worker-up       # Start GPU worker
+make worker-down     # Stop GPU worker
+make logs-worker     # View worker logs
+
+# Health and testing
+make health          # Health check all services
+make seed-corpora    # Seed RAG corpora
+make eval            # Run evaluation harness
+make mlflow-ui       # Open MLflow UI
+
 # Local development
 make up              # Start local stack
 make down            # Stop local stack
 make logs            # View logs
 make test-chat       # Test chat endpoint
 
-# Server deployment
-make up-server       # Start server stack
-make logs-server     # View server logs
-
-# Worker deployment
-make up-worker       # Start GPU worker
-make logs-worker     # View worker logs
+# Addons
+make up-addons       # Start addon stack (profiles)
+make logs-addons     # View addon logs
+make up-all          # Start core + server + addons
 
 # Testing
 make test            # Run all tests
@@ -130,23 +209,56 @@ make fix             # Fix linting issues
 make ci              # Run full CI pipeline
 ```
 
+### Subdomain Routing (Caddy)
+
+- The reverse proxy uses subdomains with internal TLS. We now prefer the `.lan` domain to avoid mDNS conflicts with `.local`. Add DNS/hosts entries pointing these to the server IP (e.g., via Pi‑hole):
+  - api.lan, router.lan
+  - ai.lan (WrkHrs AI stack)
+  - mlflow.lan, tempo.lan, loki.lan, jaeger.lan (observability)
+  - grafana.lan, prometheus.lan
+  - homarr.lan, pihole.lan
+  - meili.lan, searx.lan
+  - sso.lan (Authentik)
+  - nextcloud.lan, immich.lan, vikunja.lan, pelican.lan
+  - mcp-github.lan, mcp-files.lan, mcp-secrets.lan, mcp-vector.lan
+- When accessing from a browser, use port 8443 (example: https://grafana.lan:8443).
+
+### DNS Blocker Choice (Pi‑hole vs AdGuard)
+
+- Pi‑hole is enabled by default in the server stack. AdGuard Home is scaffolded in its own compose profile and is not started by `make up-addons`.
+- Use only one DNS blocker at a time. To test AdGuard:
+  1) Stop Pi‑hole: `docker compose -f docker-compose.server.yml stop pihole`
+  2) Start AdGuard: `docker compose -f docker-compose.addons.yml --profile adguard up -d`
+  3) Visit https://adguard.local:8443 after adding DNS/hosts entries
+
 ## Project Structure
 
 ```
-agent-orchestrator/
+Birtha_bigger_n_badder/
 ├── services/                    # Core services
-│   ├── api/                    # FastAPI control plane
+│   ├── api/                    # FastAPI control plane with WrkHrs integration
+│   │   ├── src/wrkhrs/         # WrkHrs integration layer
+│   │   ├── src/observability/  # MLflow logging and OpenTelemetry
+│   │   ├── src/policies/       # Policy enforcement middleware
+│   │   └── src/routes/          # API routes for feedback and middleware
 │   ├── router/                 # Agent router with MCP integration
-│   ├── worker_client/          # vLLM/TGI client
-│   ├── queue/                  # Redis configuration
-│   └── gateway/                # Optional auth proxy
+│   │   ├── src/workflows/      # LangChain/LangGraph workflows
+│   │   └── src/observability/  # OpenTelemetry instrumentation
+│   ├── wrkhrs/                 # WrkHrs AI services (cloned from GitHub)
+│   │   ├── services/           # WrkHrs core services
+│   │   └── .wrkhrs-version     # Version tracking
+│   ├── mcp-registry/           # MCP registry service
+│   └── queue/                  # Redis configuration
 ├── mcp/                        # MCP servers
 │   ├── servers/                # Global and per-repo MCP servers
+│   │   ├── github-mcp/         # GitHub MCP with Projects integration
+│   │   ├── code-resources-mcp/ # Code indexing and search
+│   │   └── doc-resources-mcp/  # Document indexing and search
 │   └── config/                 # MCP server configuration
 ├── infra/                      # Infrastructure configuration
 │   ├── reverse-proxy/          # Caddy configuration
 │   ├── networking/             # WireGuard, Tailscale
-│   ├── observability/          # Prometheus, Grafana
+│   ├── observability/          # Prometheus, Grafana, Loki, Tempo
 │   └── security/               # Fail2ban, CrowdSec
 ├── worker/                     # GPU worker configuration
 │   ├── vllm/                   # vLLM setup and docs
@@ -154,10 +266,15 @@ agent-orchestrator/
 ├── deploy/                     # Deployment scripts and guides
 │   ├── server/                 # Proxmox provisioning
 │   └── ci/                     # CI/CD scripts
+├── scripts/                    # Helper scripts
+│   ├── health_check.sh         # Unified health check
+│   └── ingest/                 # Corpus ingestion scripts
+├── docs/                       # Documentation
+│   ├── runbooks/               # Operational runbooks
+│   └── adr/                    # Architecture Decision Records
 └── dev/                        # Development tools
     ├── containers/             # Dev container configuration
-    ├── scripts/                # Helper scripts
-    └── docs/                   # Architecture and decisions
+    └── scripts/                # Helper scripts
 ```
 
 ## Contributing

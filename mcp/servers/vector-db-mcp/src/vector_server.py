@@ -1,15 +1,14 @@
 """Vector database operations MCP server."""
 
 import json
+import os
 from typing import Any, Dict, List, Optional, Union
 
-import numpy as np
 import structlog
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 from qdrant_client import QdrantClient
 from qdrant_client.http import models
-from sentence_transformers import SentenceTransformer
 
 from .embedding_service import EmbeddingService
 

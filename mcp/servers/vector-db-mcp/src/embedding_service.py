@@ -5,7 +5,10 @@ from typing import List, Optional
 
 import numpy as np
 import structlog
-from sentence_transformers import SentenceTransformer
+try:
+    from sentence_transformers import SentenceTransformer  # type: ignore
+except Exception:  # pragma: no cover - optional dependency
+    SentenceTransformer = None  # type: ignore
 
 logger = structlog.get_logger()
 
@@ -22,8 +25,12 @@ class EmbeddingService:
     def _load_model(self):
         """Load the embedding model."""
         try:
-            self.model = SentenceTransformer(self.model_name)
-            logger.info("Embedding model loaded", model=self.model_name)
+            if SentenceTransformer is not None:
+                self.model = SentenceTransformer(self.model_name)
+                logger.info("Embedding model loaded", model=self.model_name)
+            else:
+                logger.warning("sentence-transformers not installed; using fallback hasher embeddings")
+                self.model = None
         except Exception as e:
             logger.error("Failed to load embedding model", model=self.model_name, error=str(e))
             self.model = None
@@ -31,7 +38,14 @@ class EmbeddingService:
     async def embed_text(self, text: str) -> List[float]:
         """Generate embedding for a single text."""
         if not self.model:
-            raise RuntimeError("Embedding model not loaded")
+            # Fallback: deterministic hashing-based embedding
+            import hashlib
+            dim = 384
+            h = hashlib.blake2b(text.encode("utf-8"), digest_size=64).digest()
+            # Repeat hash to fill dim, convert bytes to floats in [0,1]
+            vals = list(h) * ((dim + len(h) - 1) // len(h))
+            arr = np.array(vals[:dim], dtype=np.float32) / 255.0
+            return arr.tolist()
         
         try:
             # Run embedding in thread pool to avoid blocking
@@ -52,7 +66,8 @@ class EmbeddingService:
     async def embed_texts(self, texts: List[str]) -> List[List[float]]:
         """Generate embeddings for multiple texts."""
         if not self.model:
-            raise RuntimeError("Embedding model not loaded")
+            # Fallback batch: apply single fallback
+            return [await self.embed_text(t) for t in texts]
         
         try:
             # Run embedding in thread pool to avoid blocking
@@ -73,7 +88,7 @@ class EmbeddingService:
     def get_embedding_dimension(self) -> int:
         """Get the dimension of embeddings produced by this model."""
         if not self.model:
-            return 0
+            return 384
         
         # Get dimension by encoding a dummy text
         dummy_embedding = self.model.encode("dummy")

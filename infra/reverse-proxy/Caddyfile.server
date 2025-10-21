@@ -1,8 +1,4 @@
-# Caddyfile for server (control plane)
-# Routes API, router, Grafana, Prometheus with internal TLS and IP allowlists
-
 {
-    # Global options
     auto_https off
     log {
         output stdout
@@ -11,18 +7,16 @@
     }
 }
 
-# Internal API endpoints (LAN only)
-:443 {
-    # Enable compression
+(lan) {
     encode zstd gzip
-
-    # IP allowlist for internal access
     @internal {
         remote_ip 10.0.0.0/8 192.168.0.0/16 172.16.0.0/12
     }
+}
 
-    # API service
-    handle_path /api* {
+api.local:443 {
+    import lan
+    handle @internal {
         reverse_proxy api:8080 {
             header_up Host {host}
             header_up X-Real-IP {remote_host}
@@ -30,9 +24,15 @@
             header_up X-Forwarded-Proto {scheme}
         }
     }
+    handle {
+        respond "Forbidden" 403
+    }
+    tls internal
+}
 
-    # Router service
-    handle_path /router* {
+router.local:443 {
+    import lan
+    handle @internal {
         reverse_proxy router:8000 {
             header_up Host {host}
             header_up X-Real-IP {remote_host}
@@ -40,104 +40,288 @@
             header_up X-Forwarded-Proto {scheme}
         }
     }
-
-    # Grafana dashboard
-    handle_path /grafana* {
-        reverse_proxy grafana:3000 {
-            header_up Host {host}
-            header_up X-Real-IP {remote_host}
-            header_up X-Forwarded-For {remote_host}
-            header_up X-Forwarded-Proto {scheme}
-        }
-    }
-
-    # Prometheus metrics
-    handle_path /prometheus* {
-        reverse_proxy prometheus:9090 {
-            header_up Host {host}
-            header_up X-Real-IP {remote_host}
-            header_up X-Forwarded-For {remote_host}
-            header_up X-Forwarded-Proto {scheme}
-        }
-    }
-
-    # MCP servers
-    handle_path /mcp/github* {
-        reverse_proxy mcp-github:7000 {
-            header_up Host {host}
-            header_up X-Real-IP {remote_host}
-            header_up X-Forwarded-For {remote_host}
-            header_up X-Forwarded-Proto {scheme}
-        }
-    }
-
-    handle_path /mcp/filesystem* {
-        reverse_proxy mcp-filesystem:7001 {
-            header_up Host {host}
-            header_up X-Real-IP {remote_host}
-            header_up X-Forwarded-For {remote_host}
-            header_up X-Forwarded-Proto {scheme}
-        }
-    }
-
-    handle_path /mcp/secrets* {
-        reverse_proxy mcp-secrets:7002 {
-            header_up Host {host}
-            header_up X-Real-IP {remote_host}
-            header_up X-Forwarded-For {remote_host}
-            header_up X-Forwarded-Proto {scheme}
-        }
-    }
-
-    handle_path /mcp/vector-db* {
-        reverse_proxy mcp-vector-db:7003 {
-            header_up Host {host}
-            header_up X-Real-IP {remote_host}
-            header_up X-Forwarded-For {remote_host}
-            header_up X-Forwarded-Proto {scheme}
-        }
-    }
-
-    # Pi-hole admin interface
-    handle_path /pihole* {
-        reverse_proxy pihole:80 {
-            header_up Host {host}
-            header_up X-Real-IP {remote_host}
-            header_up X-Forwarded-For {remote_host}
-            header_up X-Forwarded-Proto {scheme}
-        }
-    }
-
-    # Health check endpoint
-    handle /health {
-        respond "OK" 200
-    }
-
-    # Default response for allowed IPs
-    handle @internal {
-        respond "Agent Orchestrator Control Plane" 200
-    }
-
-    # Block external access
     handle {
         respond "Forbidden" 403
     }
-
-    # Use internal TLS
     tls internal
 }
 
-# HTTP redirect to HTTPS
-:80 {
-    @internal {
-        remote_ip 10.0.0.0/8 192.168.0.0/16 172.16.0.0/12
-    }
-
+grafana.local:443 {
+    import lan
     handle @internal {
-        redir https://{host}{uri} permanent
+        reverse_proxy grafana:3000
     }
-
     handle {
         respond "Forbidden" 403
     }
+    tls internal
 }
+
+prometheus.local:443 {
+    import lan
+    handle @internal {
+        reverse_proxy prometheus:9090
+    }
+    handle {
+        respond "Forbidden" 403
+    }
+    tls internal
+}
+
+homarr.local:443 {
+    import lan
+    handle @internal {
+        reverse_proxy homarr:7575
+    }
+    handle {
+        respond "Forbidden" 403
+    }
+    tls internal
+}
+
+pihole.local:443 {
+    import lan
+    handle @internal {
+        reverse_proxy pihole:80
+    }
+    handle {
+        respond "Forbidden" 403
+    }
+    tls internal
+}
+
+adguard.local:443 {
+    import lan
+    handle @internal {
+        reverse_proxy adguardhome:80
+    }
+    handle {
+        respond "Forbidden" 403
+    }
+    tls internal
+}
+
+meili.local:443 {
+    import lan
+    handle @internal {
+        reverse_proxy meilisearch:7700
+    }
+    handle {
+        respond "Forbidden" 403
+    }
+    tls internal
+}
+
+searx.local:443 {
+    import lan
+    handle @internal {
+        reverse_proxy searxng:8080
+    }
+    handle {
+        respond "Forbidden" 403
+    }
+    tls internal
+}
+
+sso.local:443 {
+    import lan
+    handle @internal {
+        reverse_proxy authentik-server:9000
+    }
+    handle {
+        respond "Forbidden" 403
+    }
+    tls internal
+}
+
+nextcloud.local:443 {
+    import lan
+    handle @internal {
+        reverse_proxy nextcloud:80
+    }
+    handle {
+        respond "Forbidden" 403
+    }
+    tls internal
+}
+
+immich.local:443 {
+    import lan
+    handle @internal {
+        reverse_proxy immich-server:2283
+    }
+    handle {
+        respond "Forbidden" 403
+    }
+    tls internal
+}
+
+vikunja.local:443 {
+    import lan
+    handle @internal {
+        reverse_proxy vikunja-frontend:80
+    }
+    handle {
+        respond "Forbidden" 403
+    }
+    tls internal
+}
+
+pelican.local:443 {
+    import lan
+    handle @internal {
+        reverse_proxy pelican-panel:80
+    }
+    handle {
+        respond "Forbidden" 403
+    }
+    tls internal
+}
+
+mcp-github.local:443 {
+    import lan
+    handle @internal {
+        reverse_proxy mcp-github:7000
+    }
+    handle {
+        respond "Forbidden" 403
+    }
+    tls internal
+}
+
+mcp-files.local:443 {
+    import lan
+    handle @internal {
+        reverse_proxy mcp-filesystem:7001
+    }
+    handle {
+        respond "Forbidden" 403
+    }
+    tls internal
+}
+
+mcp-secrets.local:443 {
+    import lan
+    handle @internal {
+        reverse_proxy mcp-secrets:7002
+    }
+    handle {
+        respond "Forbidden" 403
+    }
+    tls internal
+}
+
+mcp-vector.local:443 {
+    import lan
+    handle @internal {
+        reverse_proxy mcp-vector-db:7003
+    }
+    handle {
+        respond "Forbidden" 403
+    }
+    tls internal
+}
+
+# WrkHrs AI Stack Services
+ai.local:443 {
+    import lan
+    handle @internal {
+        reverse_proxy wrkhrs-gateway:8000
+    }
+    handle {
+        respond "Forbidden" 403
+    }
+    tls internal
+}
+
+mlflow.local:443 {
+    import lan
+    handle @internal {
+        reverse_proxy mlflow:5000
+    }
+    handle {
+        respond "Forbidden" 403
+    }
+    tls internal
+}
+
+tempo.local:443 {
+    import lan
+    handle @internal {
+        reverse_proxy tempo:3200
+    }
+    handle {
+        respond "Forbidden" 403
+    }
+    tls internal
+}
+
+loki.local:443 {
+    import lan
+    handle @internal {
+        reverse_proxy loki:3100
+    }
+    handle {
+        respond "Forbidden" 403
+    }
+    tls internal
+}
+
+jaeger.local:443 {
+    import lan
+    handle @internal {
+        reverse_proxy jaeger:16686
+    }
+    handle {
+        respond "Forbidden" 403
+    }
+    tls internal
+}
+
+# Media stack
+sonarr.local:443 {
+    import lan
+    handle @internal {
+        reverse_proxy sonarr:8989
+    }
+    handle {
+        respond "Forbidden" 403
+    }
+    tls internal
+}
+
+radarr.local:443 {
+    import lan
+    handle @internal {
+        reverse_proxy radarr:7878
+    }
+    handle {
+        respond "Forbidden" 403
+    }
+    tls internal
+}
+
+jellyseerr.local:443 {
+    import lan
+    handle @internal {
+        reverse_proxy jellyseerr:5055
+    }
+    handle {
+        respond "Forbidden" 403
+    }
+    tls internal
+}
+
+prowlarr.local:443 {
+    import lan
+    handle @internal {
+        reverse_proxy prowlarr:9696
+    }
+    handle {
+        respond "Forbidden" 403
+    }
+    tls internal
+}
+
+# Import .lan aliases
+import Caddyfile.lan

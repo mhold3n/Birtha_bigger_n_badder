@@ -19,8 +19,17 @@ ENV PATH="/opt/venv/bin:$PATH"
 
 # Copy requirements and install Python dependencies
 COPY pyproject.toml ./
+COPY README.md ./
 RUN pip install --upgrade pip && \
-    pip install -e .
+    pip install \
+      fastapi>=0.104.0 \
+      uvicorn[standard]>=0.24.0 \
+      httpx>=0.25.0 \
+      redis>=5.0.0 \
+      pydantic>=2.5.0 \
+      pydantic-settings>=2.1.0 \
+      structlog>=23.2.0 \
+      pyyaml>=6.0.0
 
 # Production stage
 FROM python:3.11-slim as production

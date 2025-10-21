@@ -22,6 +22,19 @@ up-server:
 logs-server:
 	docker compose -f docker-compose.yml -f docker-compose.server.yml logs -f
 
+redeploy-caddy:
+	./dev/scripts/redeploy_caddy.sh
+
+# Addons
+up-addons:
+	COMPOSE_PROFILES=security,search,ai,media,data,games,apps,network docker compose -f docker-compose.addons.yml up -d
+
+logs-addons:
+	COMPOSE_PROFILES=security,search,ai,media,data,games,apps,network docker compose -f docker-compose.addons.yml logs -f
+
+up-all:
+	COMPOSE_PROFILES=security,search,ai,media,data,games,apps,network docker compose -f docker-compose.yml -f docker-compose.server.yml -f docker-compose.addons.yml up -d --build
+
 # Worker deployment
 up-worker:
 	docker compose -f docker-compose.worker.yml up -d
@@ -29,9 +42,82 @@ up-worker:
 logs-worker:
 	docker compose -f docker-compose.worker.yml logs -f
 
+# Platform services (MLflow, observability)
+platform-up:
+	docker compose -f docker-compose.yml -f docker-compose.platform.yml up -d
+
+platform-down:
+	docker compose -f docker-compose.yml -f docker-compose.platform.yml down
+
+logs-platform:
+	docker compose -f docker-compose.yml -f docker-compose.platform.yml logs -f
+
+# AI stack (WrkHrs services)
+ai-up:
+	docker compose -f docker-compose.yml -f docker-compose.ai.yml up -d
+
+ai-down:
+	docker compose -f docker-compose.yml -f docker-compose.ai.yml down
+
+logs-ai:
+	docker compose -f docker-compose.yml -f docker-compose.ai.yml logs -f
+
+# Full server deployment (platform + AI + server)
+server-up:
+	docker compose -f docker-compose.yml -f docker-compose.platform.yml -f docker-compose.ai.yml -f docker-compose.server.yml up -d
+
+server-down:
+	docker compose -f docker-compose.yml -f docker-compose.platform.yml -f docker-compose.ai.yml -f docker-compose.server.yml down
+
+logs-server-full:
+	docker compose -f docker-compose.yml -f docker-compose.platform.yml -f docker-compose.ai.yml -f docker-compose.server.yml logs -f
+
+# Worker (GPU) deployment
+worker-up:
+	docker compose -f docker-compose.worker.yml up -d
+
+worker-down:
+	docker compose -f docker-compose.worker.yml down
+
+logs-worker:
+	docker compose -f docker-compose.worker.yml logs -f
+
+# Health checks
+health:
+	@./scripts/health_check.sh
+
+# Seed corpora
+seed-corpora:
+	python scripts/ingest/ingest_code.py
+	python scripts/ingest/ingest_docs.py
+
+# Run evaluation
+eval:
+	pytest services/api/tests/eval/ -v --tb=short
+
+# MLflow UI
+mlflow-ui:
+	@echo "MLflow UI: http://localhost:5000"
+	@echo "Grafana: http://localhost:3000"
+
 # Testing
-test:
-	pytest -q --maxfail=1 --cov=services --cov-report=xml --cov-report=term
+test-api:
+	set -e; \
+	export PYTHONPATH=services/api; \
+	pytest -q services/api/tests --maxfail=1 --cov=services/api/src --cov-report= --cov-append=no
+
+test-router:
+	set -e; \
+	export PYTHONPATH=services/router; \
+	pytest -q services/router/tests --maxfail=1 --cov=services/router/src --cov-report= --cov-append
+
+test-combined: test-api test-router
+	set -e; \
+	python -m coverage combine || true; \
+	python -m coverage report --fail-under=80; \
+	python -m coverage xml
+
+test: test-combined
 
 lint:
 	ruff check services && black --check services
@@ -43,7 +129,7 @@ fix:
 	ruff check --fix services && black services
 
 # CI simulation
-ci: lint type test
+ci: lint type test-combined
 
 # Deployment helpers
 deploy-server:

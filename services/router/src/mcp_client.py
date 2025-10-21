@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional
 
 import structlog
 import yaml
-from httpx import AsyncClient, HTTPError, TimeoutException
+from httpx import AsyncClient, HTTPError, Timeout
 
 from .config import settings
 
@@ -16,9 +16,13 @@ logger = structlog.get_logger()
 class MCPServer:
     """Represents an MCP server configuration."""
 
-    def __init__(self, name: str, server_type: str, url: str, **kwargs):
+    def __init__(self, name: str, url: str, server_type: Optional[str] = None, type: Optional[str] = None, **kwargs):
+        # Accept either 'server_type' or legacy 'type' key from config
+        resolved_type = server_type or type
+        if not resolved_type:
+            raise ValueError("server_type is required (use 'server_type' or 'type' in config)")
         self.name = name
-        self.server_type = server_type
+        self.server_type = resolved_type
         self.url = url
         self.config = kwargs
 
@@ -60,9 +64,11 @@ class MCPClient:
     async def __aenter__(self):
         """Async context manager entry."""
         self.http_client = AsyncClient(
-            timeout=TimeoutException(
+            timeout=Timeout(
                 connect=settings.mcp_connect_timeout,
                 read=settings.mcp_request_timeout,
+                write=settings.mcp_request_timeout,
+                pool=settings.mcp_request_timeout,
             )
         )
         return self

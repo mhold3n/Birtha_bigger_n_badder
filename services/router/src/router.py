@@ -75,6 +75,10 @@ class TaskRequest(BaseModel):
     )
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     max_tokens: Optional[int] = Field(default=None, gt=0)
+    # Optional: extra context for workflows (e.g., repo list)
+    context: Optional[Dict[str, Any]] = Field(default=None)
+    # Optional: per-tool arguments override. Key format: 'server:tool'.
+    tool_args: Optional[Dict[str, Dict[str, Any]]] = Field(default=None)
 
 
 class TaskResponse(BaseModel):
@@ -298,11 +302,17 @@ async def route_task(request: TaskRequest):
                             server_name = servers[0].name
                             tool_name = tool_spec
                         
+                        # Build tool arguments
+                        args: Dict[str, Any] = {"query": request.prompt}
+                        key = f"{server_name}:{tool_name}"
+                        if request.tool_args and key in request.tool_args:
+                            args.update(request.tool_args[key])
+
                         # Call the MCP tool
                         tool_result = await mcp.call_tool(
                             server_name,
                             tool_name,
-                            {"query": request.prompt},
+                            args,
                         )
                         
                         # Add tool result to messages
@@ -352,7 +362,8 @@ async def route_task(request: TaskRequest):
         
     except HTTPError as e:
         execution_time = asyncio.get_event_loop().time() - start_time
-        error_msg = f"API request failed: {e.response.text if e.response else str(e)}"
+        resp = getattr(e, "response", None)
+        error_msg = f"API request failed: {resp.text if resp is not None else str(e)}"
         
         logger.error(
             "Task failed with API error",

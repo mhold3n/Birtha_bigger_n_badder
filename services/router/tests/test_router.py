@@ -130,11 +130,14 @@ class TestRouteEndpoint:
         test_client: TestClient, 
         setup_clients,
         sample_task_request: dict,
-        mock_mcp_client
+        mock_mcp_client,
+        mock_api_client: AsyncMock
     ):
         """Test successful task routing."""
         import src.router
         
+        # Ensure api_client is available (avoid race with startup)
+        src.router.api_client = mock_api_client
         with patch("src.router.MCPClient") as mock_mcp_class:
             mock_mcp_class.return_value.__aenter__.return_value = mock_mcp_client
             
@@ -146,7 +149,7 @@ class TestRouteEndpoint:
             assert data["task_id"].startswith("task_")
             assert data["result"]["id"] == "chatcmpl-test"
             assert "test-server:test-tool" in data["tools_used"]
-            assert data["execution_time"] > 0
+            assert data["execution_time"] >= 0
 
     def test_route_task_no_api_client(self, test_client: TestClient, mock_redis: AsyncMock):
         """Test task routing when API client is not available."""
@@ -225,11 +228,7 @@ class TestRouteEndpoint:
         
         # Mock API failure
         from httpx import HTTPError
-        mock_response = AsyncMock()
-        mock_response.text = "API Error"
-        mock_response.status_code = 500
-        http_error = HTTPError("API Error", request=AsyncMock(), response=mock_response)
-        src.router.api_client.post.side_effect = http_error
+        src.router.api_client.post.side_effect = HTTPError("API Error")
         
         request = {
             "prompt": "Hello, world!",

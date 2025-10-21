@@ -1,0 +1,199 @@
+version: "3.9"
+
+# WrkHrs AI Stack Services
+# Integrates WrkHrs microservices with Birtha platform
+
+services:
+  # WrkHrs Gateway - OpenAI-compatible API with domain weighting
+  wrkhrs-gateway:
+    build:
+      context: ./services/wrkhrs
+      dockerfile: docker/gateway/Dockerfile
+    ports:
+      - "${WRKHRS_GATEWAY_PORT:-8080}:8000"
+    environment:
+      - GATEWAY_PORT=8000
+      - ORCHESTRATOR_URL=http://wrkhrs-orchestrator:8000
+      - RAG_URL=http://wrkhrs-rag:8000
+      - ASR_URL=http://wrkhrs-asr:8000
+      - LLM_RUNNER_URL=${LLM_RUNNER_URL:-http://llm-runner:8000}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    depends_on:
+      wrkhrs-orchestrator:
+        condition: service_healthy
+    volumes:
+      - gateway_state:/state
+      - logs:/logs
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 30s
+
+  # WrkHrs Orchestrator - LangChain/LangGraph workflow engine
+  wrkhrs-orchestrator:
+    build:
+      context: ./services/wrkhrs
+      dockerfile: docker/orchestrator/Dockerfile
+    ports:
+      - "${WRKHRS_ORCH_PORT:-8081}:8000"
+    environment:
+      - ORCHESTRATOR_PORT=8000
+      - TOOL_REGISTRY_URL=http://wrkhrs-tool-registry:8000
+      - RAG_URL=http://wrkhrs-rag:8000
+      - ASR_URL=http://wrkhrs-asr:8000
+      - MCP_URL=http://wrkhrs-mcp:8000
+      - LLM_RUNNER_URL=${LLM_RUNNER_URL:-http://llm-runner:8000}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    depends_on:
+      wrkhrs-tool-registry:
+        condition: service_healthy
+      wrkhrs-rag:
+        condition: service_healthy
+      wrkhrs-asr:
+        condition: service_healthy
+      wrkhrs-mcp:
+        condition: service_healthy
+    volumes:
+      - logs:/logs
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 30s
+
+  # WrkHrs RAG API - Document retrieval with Qdrant
+  wrkhrs-rag:
+    build:
+      context: ./services/wrkhrs
+      dockerfile: docker/rag/Dockerfile
+    ports:
+      - "${WRKHRS_RAG_PORT:-8082}:8000"
+    environment:
+      - RAG_PORT=8000
+      - QDRANT_URL=http://qdrant:6333
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-sentence-transformers/all-MiniLM-L6-v2}
+      - RAG_CHUNK_SIZE=${RAG_CHUNK_SIZE:-500}
+      - RAG_CHUNK_OVERLAP=${RAG_CHUNK_OVERLAP:-50}
+      - RAG_MAX_RESULTS=${RAG_MAX_RESULTS:-10}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    depends_on:
+      qdrant:
+        condition: service_healthy
+    volumes:
+      - rag_cache:/cache
+      - logs:/logs
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 30s
+
+  # WrkHrs ASR API - Speech recognition with Whisper
+  wrkhrs-asr:
+    build:
+      context: ./services/wrkhrs
+      dockerfile: docker/asr/Dockerfile
+    ports:
+      - "${WRKHRS_ASR_PORT:-8084}:8000"
+    environment:
+      - ASR_PORT=8000
+      - ASR_MODEL=${ASR_MODEL:-medium}
+      - ASR_DEVICE=${ASR_DEVICE:-cpu}
+      - ASR_LANGUAGE=${ASR_LANGUAGE:-auto}
+      - ASR_EXTRACT_TECHNICAL=${ASR_EXTRACT_TECHNICAL:-true}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    volumes:
+      - logs:/logs
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 60s
+
+  # WrkHrs Tool Registry - Pluggy-based tool discovery
+  wrkhrs-tool-registry:
+    build:
+      context: ./services/wrkhrs
+      dockerfile: docker/tool-registry/Dockerfile
+    ports:
+      - "${WRKHRS_TOOLS_PORT:-8086}:8000"
+    environment:
+      - TOOLS_PORT=8000
+      - PLUGINS_AUTO_REFRESH=${PLUGINS_AUTO_REFRESH:-true}
+      - PLUGINS_SCAN_INTERVAL=${PLUGINS_SCAN_INTERVAL:-300}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    volumes:
+      - plugins:/plugins:rw
+      - logs:/logs
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 20s
+
+  # WrkHrs MCP Server - Multi-Context Protocol for domain tools
+  wrkhrs-mcp:
+    build:
+      context: ./services/wrkhrs
+      dockerfile: docker/mcp/Dockerfile
+    ports:
+      - "${WRKHRS_MCP_PORT:-8085}:8000"
+    environment:
+      - MCP_PORT=8000
+      - CHEMISTRY_LIBS_ENABLED=${CHEMISTRY_LIBS_ENABLED:-false}
+      - MATERIALS_DB_SOURCE=${MATERIALS_DB_SOURCE:-internal}
+      - MECHANICAL_PRECISION=${MECHANICAL_PRECISION:-6}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    volumes:
+      - mcp_data:/data:rw
+      - logs:/logs
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 20s
+
+  # LLM Runner - Placeholder for GPU worker (defined in worker compose)
+  llm-runner:
+    image: alpine:latest
+    command: ["sh", "-c", "echo 'LLM Runner placeholder - use docker-compose.worker.yml for GPU deployment' && sleep infinity"]
+    environment:
+      - LLM_BACKEND=${LLM_BACKEND:-vllm}
+      - ENABLE_GPU=${ENABLE_GPU:-false}
+    restart: unless-stopped
+
+volumes:
+  gateway_state:
+    driver: local
+  rag_cache:
+    driver: local
+  plugins:
+    driver: local
+  mcp_data:
+    driver: local
+  logs:
+    driver: local
+
+
+
+
+
+
+
+
+
+
+

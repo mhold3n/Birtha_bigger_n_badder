@@ -1,6 +1,7 @@
 """FastAPI control plane for agent orchestration."""
 
 import asyncio
+from datetime import datetime
 import logging
 from typing import Any, Dict, List, Optional
 
@@ -8,12 +9,28 @@ import structlog
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from openai import AsyncOpenAI
 from prometheus_client import Counter, Histogram, generate_latest
 from pydantic import BaseModel, Field
 from redis.asyncio import Redis
+from pathlib import Path
 
 from .config import settings
+
+# Routers (scaffolded control plane API)
+try:
+    from .routes import vms as vms_router
+    from .routes import torrents as torrents_router
+    from .routes import search as search_router
+    from .routes import apps as apps_router
+    from .routes import ai as ai_router
+except Exception:
+    vms_router = None  # type: ignore
+    torrents_router = None  # type: ignore
+    search_router = None  # type: ignore
+    apps_router = None  # type: ignore
+    ai_router = None  # type: ignore
 
 # Configure structured logging
 structlog.configure(
@@ -81,6 +98,23 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Mount routers if import succeeded
+if vms_router:
+    app.include_router(vms_router.router)  # type: ignore[attr-defined]
+if torrents_router:
+    app.include_router(torrents_router.router)  # type: ignore[attr-defined]
+if search_router:
+    app.include_router(search_router.router)  # type: ignore[attr-defined]
+if apps_router:
+    app.include_router(apps_router.router)  # type: ignore[attr-defined]
+if ai_router:
+    app.include_router(ai_router.router)  # type: ignore[attr-defined]
+
+# Static UI (small SPA panels)
+_static_dir = (Path(__file__).resolve().parent / "static")
+if _static_dir.exists():
+    app.mount("/ui", StaticFiles(directory=str(_static_dir), html=True), name="ui")
 
 
 class ChatMessage(BaseModel):
@@ -212,7 +246,7 @@ async def health_check():
     
     return HealthResponse(
         status="healthy" if all(s == "healthy" for s in services.values()) else "degraded",
-        timestamp=asyncio.get_event_loop().time(),
+        timestamp=datetime.utcnow().isoformat(),
         version="0.1.0",
         services=services,
     )
@@ -238,6 +272,9 @@ async def chat_completions(request: ChatRequest):
             status_code=503,
             detail="OpenAI client not available",
         )
+    # Basic validation: require at least one message
+    if not request.messages:
+        raise HTTPException(status_code=422, detail="'messages' must contain at least one item")
     
     start_time = asyncio.get_event_loop().time()
     
@@ -305,6 +342,13 @@ async def root():
         "docs": "/docs",
         "health": "/health",
         "metrics": "/metrics" if settings.enable_metrics else None,
+        "endpoints": {
+            "vms": "/api/vms",
+            "apps": "/api/apps",
+            "torrents": "/api/torrents",
+            "search": "/api/search",
+            "ai": "/api/ai",
+        },
     }
 
 

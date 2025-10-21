@@ -21,6 +21,10 @@ servers:
       - directory_traversal
       - code_analysis
       - dependency_analysis
+    config:
+      # Optional context paths for documents (marker)
+      marker_docs_dir: /mnt/appdata/addons/documents
+      marker_processed_dir: /mnt/appdata/addons/documents_processed
 
   - name: secrets-mcp
     type: http

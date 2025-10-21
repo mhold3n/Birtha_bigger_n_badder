@@ -1,0 +1,751 @@
+version: "3.9"
+
+# Optional/Addon services grouped by profiles. Enable selectively with:
+#   docker compose -f docker-compose.addons.yml --profile <name> up -d
+# Start all addon profiles via Makefile:
+#   make up-addons
+
+services:
+  # =============================
+  # Security & Networking
+  # =============================
+
+  # AdGuard Home (DNS/ad-blocking)
+  # Do NOT run alongside Pi-hole (port 53 conflict).
+  adguardhome:
+    image: adguard/adguardhome:latest
+    profiles: [adguard]
+    container_name: adguardhome
+    ports:
+      - "53:53/tcp"
+      - "53:53/udp"
+      - "3000:3000"   # initial setup UI
+      - "8082:80"     # admin UI after setup
+    volumes:
+      - adguard_data:/opt/adguardhome/work
+      - adguard_conf:/opt/adguardhome/conf
+    cap_add:
+      - NET_ADMIN
+    restart: unless-stopped
+
+  # CrowdSec (behavioral IPS - base LAPI)
+  crowdsec:
+    image: crowdsecurity/crowdsec:latest
+    profiles: [security]
+    environment:
+      - TZ=${TZ:-UTC}
+    volumes:
+      - crowdsec_data:/var/lib/crowdsec/data
+      - crowdsec_config:/etc/crowdsec
+      - /var/log:/var/log:ro
+    restart: unless-stopped
+
+  # Fail2Ban (monitors logs and bans offenders)
+  fail2ban:
+    image: crazymax/fail2ban:latest
+    profiles: [security]
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    environment:
+      - TZ=${TZ:-UTC}
+    volumes:
+      - /var/log:/var/log:ro
+      - fail2ban_data:/data
+      - ./infra/security/fail2ban/jail.local:/data/jail.d/custom.conf:ro
+    restart: unless-stopped
+
+  # WatchYourLAN (ARP/neighbor scan)
+  watchyourlan:
+    image: aceberg/watchyourlan:latest
+    profiles: [security]
+    network_mode: host
+    environment:
+      - IFACE=${WYL_IFACE:-eth0}
+      - TZ=${TZ:-UTC}
+    cap_add:
+      - NET_RAW
+      - NET_ADMIN
+    restart: unless-stopped
+
+  # Authentik (SSO)
+  authentik-postgres:
+    image: postgres:15
+    profiles: [security]
+    environment:
+      - POSTGRES_PASSWORD=${AUTHENTIK_POSTGRES_PASSWORD}
+      - POSTGRES_USER=${AUTHENTIK_POSTGRES_USER:-authentik}
+      - POSTGRES_DB=${AUTHENTIK_POSTGRES_DB:-authentik}
+    volumes:
+      - authentik_db:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  authentik-redis:
+    image: redis:7-alpine
+    profiles: [security]
+    volumes:
+      - authentik_redis:/data
+    restart: unless-stopped
+
+  authentik-server:
+    image: ghcr.io/goauthentik/server:latest
+    profiles: [security]
+    depends_on:
+      - authentik-postgres
+      - authentik-redis
+    environment:
+      - AUTHENTIK_SECRET_KEY=${AUTHENTIK_SECRET_KEY}
+      - AUTHENTIK_POSTGRESQL__HOST=authentik-postgres
+      - AUTHENTIK_POSTGRESQL__USER=${AUTHENTIK_POSTGRES_USER:-authentik}
+      - AUTHENTIK_POSTGRESQL__PASSWORD=${AUTHENTIK_POSTGRES_PASSWORD}
+      - AUTHENTIK_POSTGRESQL__NAME=${AUTHENTIK_POSTGRES_DB:-authentik}
+      - AUTHENTIK_REDIS__HOST=authentik-redis
+      - AUTHENTIK_LISTEN__HTTP=0.0.0.0:9000
+      - AUTHENTIK_LISTEN__HTTPS=0.0.0.0:9443
+    volumes:
+      - authentik_media:/media
+      - authentik_templates:/templates
+    ports:
+      - "9000:9000"
+      - "9443:9443"
+    restart: unless-stopped
+
+  authentik-worker:
+    image: ghcr.io/goauthentik/server:latest
+    profiles: [security]
+    depends_on:
+      - authentik-postgres
+      - authentik-redis
+      - authentik-server
+    command: worker
+    environment:
+      - AUTHENTIK_SECRET_KEY=${AUTHENTIK_SECRET_KEY}
+      - AUTHENTIK_POSTGRESQL__HOST=authentik-postgres
+      - AUTHENTIK_POSTGRESQL__USER=${AUTHENTIK_POSTGRES_USER:-authentik}
+      - AUTHENTIK_POSTGRESQL__PASSWORD=${AUTHENTIK_POSTGRES_PASSWORD}
+      - AUTHENTIK_POSTGRESQL__NAME=${AUTHENTIK_POSTGRES_DB:-authentik}
+      - AUTHENTIK_REDIS__HOST=authentik-redis
+    volumes:
+      - authentik_media:/media
+      - authentik_templates:/templates
+    restart: unless-stopped
+
+  # =============================
+  # Search
+  # =============================
+
+  meilisearch:
+    image: getmeili/meilisearch:v1.7
+    profiles: [search]
+    environment:
+      - MEILI_ENV=production
+      - MEILI_MASTER_KEY=${MEILI_MASTER_KEY}
+    ports:
+      - "7700:7700"
+    volumes:
+      - meili_data:/meili_data
+    restart: unless-stopped
+
+  searxng:
+    image: searxng/searxng:latest
+    profiles: [search]
+    environment:
+      - SEARXNG_BASE_URL=${SEARXNG_BASE_URL:-http://localhost:8083/}
+    ports:
+      - "8083:8080"
+    volumes:
+      - ./infra/search/searxng:/etc/searxng
+    restart: unless-stopped
+
+  # Optional: Elasticsearch (disabled by default; requires vm.max_map_count tuning)
+  # elasticsearch:
+  #   image: docker.elastic.co/elasticsearch/elasticsearch:8.15.3
+  #   profiles: [search]
+  #   environment:
+  #     - discovery.type=single-node
+  #     - ES_JAVA_OPTS=-Xms512m -Xmx512m
+  #   ports:
+  #     - "9200:9200"
+  #   volumes:
+  #     - es_data:/usr/share/elasticsearch/data
+  #   restart: unless-stopped
+
+  # =============================
+  # AI Agent Stack (LangChain / Haystack)
+  # =============================
+
+  ai-stack:
+    build:
+      context: ./services/ai_stack
+    profiles: [ai]
+    environment:
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+    ports:
+      - "8090:8090"
+    restart: unless-stopped
+
+  # =============================
+  # Media Management (ARR Suite)
+  # =============================
+
+  prowlarr:
+    image: lscr.io/linuxserver/prowlarr:latest
+    profiles: [media]
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-UTC}
+    volumes:
+      - prowlarr_config:/config
+    ports:
+      - "9696:9696"
+    restart: unless-stopped
+
+  sonarr:
+    image: lscr.io/linuxserver/sonarr:latest
+    profiles: [media]
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-UTC}
+    volumes:
+      - sonarr_config:/config
+      - media:/media
+      - downloads:/downloads
+    ports:
+      - "8989:8989"
+    depends_on:
+      - prowlarr
+    restart: unless-stopped
+
+  radarr:
+    image: lscr.io/linuxserver/radarr:latest
+    profiles: [media]
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-UTC}
+    volumes:
+      - radarr_config:/config
+      - media:/media
+      - downloads:/downloads
+    ports:
+      - "7878:7878"
+    depends_on:
+      - prowlarr
+    restart: unless-stopped
+
+  jellyseerr:
+    image: ghcr.io/fallenbagel/jellyseerr:latest
+    profiles: [media]
+    environment:
+      - LOG_LEVEL=info
+      - TZ=${TZ:-UTC}
+    volumes:
+      - jellyseerr_config:/app/config
+    ports:
+      - "5055:5055"
+    restart: unless-stopped
+
+  # Route qBittorrent via Mullvad (gluetun) for privacy
+  gluetun:
+    image: qmcgaw/gluetun:latest
+    profiles: [network, media]
+    cap_add:
+      - NET_ADMIN
+    ports:
+      - "8085:8080" # qBittorrent Web UI (forwarded)
+      - "6881:6881/tcp" # BitTorrent TCP
+      - "6881:6881/udp" # BitTorrent UDP
+    environment:
+      - VPN_SERVICE_PROVIDER=mullvad
+      - VPN_TYPE=wireguard
+      - WIREGUARD_PRIVATE_KEY=${MULLVAD_WG_PRIVATE_KEY}
+      - WIREGUARD_ADDRESSES=${MULLVAD_WG_ADDRESS}
+      - SERVER_CITIES=${MULLVAD_SERVER_CITIES}
+      - TZ=${TZ:-UTC}
+    restart: unless-stopped
+
+  qbittorrent:
+    image: lscr.io/linuxserver/qbittorrent:latest
+    profiles: [media]
+    depends_on:
+      - gluetun
+    network_mode: "service:gluetun"
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-UTC}
+      - WEBUI_PORT=8080
+      - QBT_TrackerPort=6881
+    volumes:
+      - qbittorrent_config:/config
+      - downloads:/downloads
+      - media:/media
+    restart: unless-stopped
+
+  # Marker-based PDF optimizer/watcher
+  marker-watcher:
+    build:
+      context: ./services/marker_watcher
+    profiles: [media]
+    environment:
+      - TZ=${TZ:-UTC}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - INPUT_DIR=/documents
+      - OUTPUT_DIR=/processed
+      - ERROR_WEBHOOK_URL=${ERROR_WEBHOOK_URL:-}
+    user: "${PUID:-1000}:${PGID:-1000}"
+    volumes:
+      - documents:/documents
+      - documents_processed:/processed
+    restart: unless-stopped
+
+  # =============================
+  # Backups & Personal Data
+  # =============================
+
+  nextcloud-db:
+    image: mariadb:10.11
+    profiles: [data]
+    command: --transaction-isolation=READ-COMMITTED --log-bin=ROW
+    environment:
+      - MYSQL_ROOT_PASSWORD=${NEXTCLOUD_DB_ROOT_PASSWORD}
+      - MYSQL_DATABASE=nextcloud
+      - MYSQL_USER=nextcloud
+      - MYSQL_PASSWORD=${NEXTCLOUD_DB_PASSWORD}
+    volumes:
+      - nextcloud_db:/var/lib/mysql
+    restart: unless-stopped
+
+  nextcloud-redis:
+    image: redis:7-alpine
+    profiles: [data]
+    volumes:
+      - nextcloud_redis:/data
+    restart: unless-stopped
+
+  nextcloud:
+    image: nextcloud:latest
+    profiles: [data]
+    depends_on:
+      - nextcloud-db
+      - nextcloud-redis
+    environment:
+      - MYSQL_HOST=nextcloud-db
+      - MYSQL_DATABASE=nextcloud
+      - MYSQL_USER=nextcloud
+      - MYSQL_PASSWORD=${NEXTCLOUD_DB_PASSWORD}
+      - REDIS_HOST=nextcloud-redis
+    volumes:
+      - nextcloud_html:/var/www/html
+      - nextcloud_data:/var/www/html/data
+    ports:
+      - "8084:80"
+    restart: unless-stopped
+
+  immich-postgres:
+    image: ghcr.io/immich-app/immich-postgres:15
+    profiles: [data]
+    environment:
+      - POSTGRES_PASSWORD=${IMMICH_DB_PASSWORD}
+      - POSTGRES_DB=immich
+      - POSTGRES_USER=immich
+    volumes:
+      - immich_db:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  immich-redis:
+    image: redis:7-alpine
+    profiles: [data]
+    volumes:
+      - immich_redis:/data
+    restart: unless-stopped
+
+  immich-server:
+    image: ghcr.io/immich-app/immich-server:release
+    profiles: [data]
+    depends_on:
+      - immich-postgres
+      - immich-redis
+    environment:
+      - DB_HOSTNAME=immich-postgres
+      - DB_USERNAME=immich
+      - DB_PASSWORD=${IMMICH_DB_PASSWORD}
+      - DB_DATABASE_NAME=immich
+      - REDIS_HOSTNAME=immich-redis
+    volumes:
+      - immich_upload:/usr/src/app/upload
+    ports:
+      - "2283:2283"
+    restart: unless-stopped
+
+  immich-ml:
+    image: ghcr.io/immich-app/immich-machine-learning:release
+    profiles: [data]
+    depends_on:
+      - immich-server
+    restart: unless-stopped
+
+  # =============================
+  # Game Servers
+  # =============================
+
+  minecraft:
+    image: itzg/minecraft-server:latest
+    profiles: [games]
+    environment:
+      - EULA=TRUE
+      - TYPE=FABRIC
+      - VERSION=${MC_VERSION:-1.20.1}
+      - MEMORY=${MC_MEMORY:-4G}
+    ports:
+      - "25565:25565"
+    volumes:
+      - minecraft_data:/data
+    restart: unless-stopped
+
+  # Pelican Panel (placeholder)
+  pelican-panel:
+    image: mdevos/pelican-panel:latest
+    profiles: [games]
+    environment:
+      - TZ=${TZ:-UTC}
+    ports:
+      - "8087:80"
+    volumes:
+      - pelican_data:/pelican-data
+    restart: unless-stopped
+
+  # =============================
+  # Personal / Utility Apps
+  # =============================
+
+  vikunja-api:
+    image: vikunja/api:latest
+    profiles: [apps]
+    environment:
+      - VIKUNJA_SERVICE_PUBLICURL=${VIKUNJA_PUBLIC_URL:-http://localhost:8088}
+      - VIKUNJA_DATABASE_HOST=vikunja-db
+      - VIKUNJA_DATABASE_DATABASE=vikunja
+      - VIKUNJA_DATABASE_USER=vikunja
+      - VIKUNJA_DATABASE_PASSWORD=${VIKUNJA_DB_PASSWORD}
+    depends_on:
+      - vikunja-db
+    volumes:
+      - vikunja_files:/app/vikunja/files
+    restart: unless-stopped
+
+  vikunja-frontend:
+    image: vikunja/frontend:latest
+    profiles: [apps]
+    environment:
+      - VIKUNJA_API_URL=/api/v1
+    depends_on:
+      - vikunja-api
+    ports:
+      - "8088:80"
+    restart: unless-stopped
+
+  vikunja-db:
+    image: postgres:15
+    profiles: [apps]
+    environment:
+      - POSTGRES_PASSWORD=${VIKUNJA_DB_PASSWORD}
+      - POSTGRES_USER=vikunja
+      - POSTGRES_DB=vikunja
+    volumes:
+      - vikunja_db:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  # AnonAddy (email aliasing) - requires external SMTP/DNS configuration
+  anonaddy:
+    image: anonaddy/anonaddy:latest
+    profiles: [apps]
+    environment:
+      - APP_KEY=${ANONADDY_APP_KEY}
+      - ANONADDY_DB_HOST=anonaddy-db
+      - ANONADDY_DB_DATABASE=anonaddy
+      - ANONADDY_DB_USERNAME=anonaddy
+      - ANONADDY_DB_PASSWORD=${ANONADDY_DB_PASSWORD}
+    depends_on:
+      - anonaddy-db
+    ports:
+      - "8091:8000"
+    volumes:
+      - anonaddy_data:/data
+    restart: unless-stopped
+
+  anonaddy-db:
+    image: mariadb:10.11
+    profiles: [apps]
+    environment:
+      - MYSQL_ROOT_PASSWORD=${ANONADDY_DB_ROOT_PASSWORD}
+      - MYSQL_DATABASE=anonaddy
+      - MYSQL_USER=anonaddy
+      - MYSQL_PASSWORD=${ANONADDY_DB_PASSWORD}
+    volumes:
+      - anonaddy_db:/var/lib/mysql
+    restart: unless-stopped
+
+  # Kasm Workspaces (browser desktops) — heavy; requires >2GB RAM
+  kasm:
+    image: kasmweb/workspaces:1.14.0
+    profiles: [apps]
+    privileged: true
+    shm_size: "1g"
+    ports:
+      - "8444:443"
+    environment:
+      - TZ=${TZ:-UTC}
+    volumes:
+      - kasm_data:/opt/kasm
+    restart: unless-stopped
+
+  # =============================
+  # Network Stack
+  # =============================
+
+  tailscale:
+    image: tailscale/tailscale:stable
+    profiles: [network]
+    hostname: ${TAILSCALE_HOSTNAME:-agent-server}
+    network_mode: host
+    privileged: true
+    environment:
+      - TS_AUTHKEY=${TAILSCALE_AUTHKEY}
+      - TS_STATE_DIR=/var/lib/tailscale
+      - TS_USERSPACE=false
+      - TZ=${TZ:-UTC}
+    volumes:
+      - tailscale_state:/var/lib/tailscale
+      - /dev/net/tun:/dev/net/tun
+    restart: unless-stopped
+
+volumes:
+  # Security
+  adguard_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /mnt/appdata/addons/adguard_data
+  adguard_conf:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /mnt/appdata/addons/adguard_conf
+  crowdsec_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /mnt/appdata/addons/crowdsec_data
+  crowdsec_config:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /mnt/appdata/addons/crowdsec_config
+  fail2ban_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /mnt/appdata/addons/fail2ban_data
+  authentik_db:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /mnt/appdata/addons/authentik_db
+  authentik_redis:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /mnt/appdata/addons/authentik_redis
+  authentik_media:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /mnt/appdata/addons/authentik_media
+  authentik_templates:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /mnt/appdata/addons/authentik_templates
+
+  # Search
+  meili_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /mnt/appdata/addons/meili_data
+  es_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /mnt/appdata/addons/es_data
+
+  # Media
+  prowlarr_config:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /mnt/appdata/addons/prowlarr_config
+  sonarr_config:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /mnt/appdata/addons/sonarr_config
+  radarr_config:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /mnt/appdata/addons/radarr_config
+  jellyseerr_config:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /mnt/appdata/addons/jellyseerr_config
+  qbittorrent_config:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /mnt/appdata/addons/qbittorrent_config
+  media:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /mnt/appdata/addons/media
+  downloads:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /mnt/appdata/addons/downloads
+
+  # Documents (Marker)
+  documents:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /mnt/appdata/addons/documents
+  documents_processed:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /mnt/appdata/addons/documents_processed
+
+  # Personal/Data
+  nextcloud_db:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /mnt/appdata/addons/nextcloud_db
+  nextcloud_redis:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /mnt/appdata/addons/nextcloud_redis
+  nextcloud_html:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /mnt/appdata/addons/nextcloud_html
+  nextcloud_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /mnt/appdata/addons/nextcloud_data
+  immich_db:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /mnt/appdata/addons/immich_db
+  immich_redis:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /mnt/appdata/addons/immich_redis
+  immich_upload:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /mnt/appdata/addons/immich_upload
+
+  # Games
+  minecraft_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /mnt/appdata/addons/minecraft_data
+  pelican_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /mnt/appdata/addons/pelican_data
+
+  # Apps
+  vikunja_db:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /mnt/appdata/addons/vikunja_db
+  vikunja_files:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /mnt/appdata/addons/vikunja_files
+  anonaddy_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /mnt/appdata/addons/anonaddy_data
+  anonaddy_db:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /mnt/appdata/addons/anonaddy_db
+  kasm_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /mnt/appdata/addons/kasm_data
+
+  # Network
+  tailscale_state:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /mnt/appdata/addons/tailscale_state
