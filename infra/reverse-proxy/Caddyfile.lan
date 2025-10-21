@@ -136,6 +136,38 @@ ai.lan:443 {
     tls internal
 }
 
+# WrkHrs Gateway - AI orchestration
+wrkhrs.lan:443 {
+    import lan
+    handle @internal { reverse_proxy wrkhrs-gateway:8080 }
+    handle { respond "Forbidden" 403 }
+    tls internal
+}
+
+# WrkHrs Orchestrator - Task coordination
+orchestrator.lan:443 {
+    import lan
+    handle @internal { reverse_proxy wrkhrs-orchestrator:8081 }
+    handle { respond "Forbidden" 403 }
+    tls internal
+}
+
+# Worker - LLM inference (external)
+worker.lan:443 {
+    import lan
+    handle @internal { reverse_proxy worker:8443 }
+    handle { respond "Forbidden" 403 }
+    tls internal
+}
+
+# Qdrant - Vector database
+qdrant.lan:443 {
+    import lan
+    handle @internal { reverse_proxy qdrant:6333 }
+    handle { respond "Forbidden" 403 }
+    tls internal
+}
+
 mlflow.lan:443 {
     import lan
     handle @internal { reverse_proxy mlflow:5000 }
