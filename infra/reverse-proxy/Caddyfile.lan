@@ -121,6 +121,13 @@ mcp-vector.lan:443 {
     tls internal
 }
 
+mcp-registry.lan:443 {
+    import lan
+    handle @internal { reverse_proxy mcp-registry:8000 }
+    handle { respond "Forbidden" 403 }
+    tls internal
+}
+
 # WrkHrs AI Stack Services
 ai.lan:443 {
     import lan

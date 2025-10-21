@@ -86,6 +86,10 @@ logs-worker:
 health:
 	@./scripts/health_check.sh
 
+# Smoke test
+smoke-test:
+	@./scripts/smoke_test.sh
+
 # Seed corpora
 seed-corpora:
 	python scripts/ingest/ingest_code.py

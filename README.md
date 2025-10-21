@@ -78,6 +78,9 @@ docker compose -f docker-compose.worker.yml --profile ollama up -d
 # Health check all services
 make health
 
+# Smoke test with trace propagation
+make smoke-test
+
 # Test WrkHrs gateway
 curl -s http://localhost:8080/health
 
@@ -113,6 +116,7 @@ open http://localhost:5000
 - **Hedging Policy**: Detects and flags hedging language
 - **Units Policy**: Normalizes and validates SI units
 - **Policy Registry**: Dynamic policy discovery and validation
+- **Policy Middleware**: Automatic policy enforcement in chat completions with MLflow logging
 
 ### Observability & Provenance
 - **MLflow**: Experiment tracking, model registry, and artifact storage
@@ -120,6 +124,8 @@ open http://localhost:5000
 - **Prometheus**: Metrics collection and monitoring
 - **Grafana**: Dashboards and visualization
 - **Loki**: Log aggregation and analysis
+- **Request Context Middleware**: Automatic trace/run/policy header propagation
+- **Golden Trace**: End-to-end trace validation from gateway to worker
 
 ## Models & Sizing
 
@@ -148,11 +154,80 @@ This system implements a hybrid MCP (Model Context Protocol) architecture:
 - **Document Resources MCP**: PDF/textbook datasets with chunking for document search
 - **Secrets MCP**: Secure secrets management with Vault integration
 - **Vector DB MCP**: Embedding search, knowledge retrieval
+- **MCP Registry**: Auto-registration and discovery of MCP servers with health monitoring
 
 ### Per-Repo MCP Servers
 - Custom code indexers
 - Domain-specific schemas
 - Project-unique integrations
+
+## Quick Start: End-to-End Trace
+
+### Golden Trace Example
+
+Test the complete observability stack with a golden trace:
+
+```bash
+# Start the full stack
+make up-all
+
+# Run smoke test with golden trace
+make smoke-test
+
+# Send a chat request with trace headers
+curl -X POST http://localhost:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "x-trace-id: golden-trace-001" \
+  -H "x-run-id: golden-run-001" \
+  -H "x-policy-set: golden-policy" \
+  -d '{
+    "model": "mistralai/Mistral-7B-Instruct-v0.3",
+    "messages": [{"role": "user", "content": "Explain quantum computing with proper citations."}],
+    "temperature": 0.7,
+    "max_tokens": 200
+  }'
+```
+
+### Policy Enforcement
+
+The system automatically enforces policies on all chat completions:
+
+- **Hedging Detection**: Flags uncertain language ("might", "could", "seems")
+- **Citation Requirements**: Validates proper citations and references
+- **Evidence Standards**: Ensures factual claims are supported
+- **SI Units**: Normalizes measurements to standard units
+
+Policy verdicts are logged to MLflow and included in response headers:
+
+```bash
+# Check policy verdict headers
+curl -I -X POST http://localhost:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model": "test", "messages": [{"role": "user", "content": "This might be correct."}]}'
+
+# Response headers include:
+# x-policy-verdict: False
+# x-policy-score: 0.3
+```
+
+### MCP Auto-Registration
+
+MCP servers automatically register on startup:
+
+```bash
+# Register a new MCP server
+curl -X POST http://localhost:8001/mcp/registry/register \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "test-mcp",
+    "type": "tool",
+    "url": "http://test-mcp:7000",
+    "tools": [{"name": "test_tool", "description": "A test tool"}]
+  }'
+
+# List registered servers
+curl http://localhost:8001/mcp/registry
+```
 
 ## Observability
 

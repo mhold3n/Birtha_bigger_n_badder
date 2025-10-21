@@ -20,6 +20,9 @@ MLFLOW_URL="http://localhost:5000"
 GRAFANA_URL="http://localhost:3000"
 PROMETHEUS_URL="http://localhost:9090"
 QDRANT_URL="http://localhost:6333"
+MCP_REGISTRY_URL="http://localhost:8001"
+TEMPO_URL="http://localhost:3200"
+LOKI_URL="http://localhost:3100"
 
 # Function to check service health
 check_service() {
@@ -81,6 +84,9 @@ echo
 # Platform services
 echo -e "${YELLOW}Platform Services:${NC}"
 check_service "MLflow" "$MLFLOW_URL"
+check_service "MCP Registry" "$MCP_REGISTRY_URL"
+check_service "Tempo" "$TEMPO_URL"
+check_service "Loki" "$LOKI_URL"
 check_docker_service "postgres"
 check_docker_service "minio"
 check_docker_service "loki"

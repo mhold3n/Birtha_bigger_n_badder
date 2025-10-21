@@ -299,6 +299,36 @@ async def search_resources(q: str) -> List[Dict[str, Any]]:
     return registry.search_resources(q)
 
 
+@app.post("/mcp/registry/register", response_model=MCPServer)
+async def register_server(server: MCPServer) -> MCPServer:
+    """Register a new MCP server.
+    
+    Args:
+        server: MCP server to register
+        
+    Returns:
+        Registered server information
+    """
+    try:
+        # Add to registry
+        registry.servers[server.name] = server
+        
+        logger.info(
+            "MCP server registered",
+            name=server.name,
+            type=server.type,
+            url=server.url,
+            tools_count=len(server.tools),
+            resources_count=len(server.resources),
+        )
+        
+        return server
+        
+    except Exception as e:
+        logger.error("Failed to register MCP server", name=server.name, error=str(e))
+        raise HTTPException(status_code=500, detail=f"Failed to register server: {str(e)}")
+
+
 @app.get("/mcp/registry/stats")
 async def get_registry_stats() -> Dict[str, Any]:
     """Get registry statistics.

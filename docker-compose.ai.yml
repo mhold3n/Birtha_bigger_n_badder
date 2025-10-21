@@ -18,6 +18,8 @@ services:
       - ASR_URL=http://wrkhrs-asr:8000
       - LLM_RUNNER_URL=${LLM_RUNNER_URL:-http://llm-runner:8000}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://tempo:4317
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
     depends_on:
       wrkhrs-orchestrator:
         condition: service_healthy
@@ -47,6 +49,8 @@ services:
       - MCP_URL=http://wrkhrs-mcp:8000
       - LLM_RUNNER_URL=${LLM_RUNNER_URL:-http://llm-runner:8000}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://tempo:4317
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
     depends_on:
       wrkhrs-tool-registry:
         condition: service_healthy
@@ -166,6 +170,28 @@ services:
       retries: 10
       start_period: 20s
 
+  # MCP Registry - Auto-registration and discovery
+  mcp-registry:
+    build: ./services/mcp-registry
+    ports:
+      - "${MCP_REGISTRY_PORT:-8001}:8000"
+    environment:
+      - MCP_CONFIG=/mcp/config/mcp_servers.yaml
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://tempo:4317
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
+    volumes:
+      - ./mcp/config:/mcp/config:ro
+    depends_on:
+      - mlflow
+      - tempo
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 20s
+
   # LLM Runner - Placeholder for GPU worker (defined in worker compose)
   llm-runner:
     image: alpine:latest
@@ -173,6 +199,8 @@ services:
     environment:
       - LLM_BACKEND=${LLM_BACKEND:-vllm}
       - ENABLE_GPU=${ENABLE_GPU:-false}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://tempo:4317
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
     restart: unless-stopped
 
 volumes:

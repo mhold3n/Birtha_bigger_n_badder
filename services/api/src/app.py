@@ -17,6 +17,10 @@ from redis.asyncio import Redis
 from pathlib import Path
 
 from .config import settings
+from .observability.context import RequestContextMiddleware, get_request_context
+from .observability.trace import get_trace_context
+from .observability.mlflow_logger import MLflowLogger
+from .policies.middleware import policy_enforcer
 
 # Routers (scaffolded control plane API)
 try:
@@ -81,6 +85,7 @@ CHAT_DURATION = Histogram(
 # Global clients
 redis_client: Optional[Redis] = None
 openai_client: Optional[AsyncOpenAI] = None
+mlflow_logger: Optional[MLflowLogger] = None
 
 app = FastAPI(
     title="Agent Orchestrator API",
@@ -98,6 +103,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Request context middleware for provenance tracking
+app.add_middleware(RequestContextMiddleware)
 
 # Mount routers if import succeeded
 if vms_router:
@@ -183,9 +191,30 @@ async def metrics_middleware(request: Request, call_next):
 @app.on_event("startup")
 async def startup_event():
     """Initialize clients on startup."""
-    global redis_client, openai_client
+    global redis_client, openai_client, mlflow_logger
     
     logger.info("Starting Agent Orchestrator API", version="0.1.0")
+    
+    # Initialize OpenTelemetry tracing
+    try:
+        trace_context = get_trace_context()
+        trace_context.instrument_fastapi(app)
+        trace_context.instrument_httpx()
+        trace_context.instrument_requests()
+        logger.info("OpenTelemetry tracing initialized")
+    except Exception as e:
+        logger.error("Failed to initialize OpenTelemetry", error=str(e))
+    
+    # Initialize MLflow logger
+    try:
+        mlflow_logger = MLflowLogger(
+            tracking_uri=getattr(settings, 'mlflow_tracking_uri', 'http://mlflow:5000'),
+            experiment_name="birtha-ai-runs"
+        )
+        logger.info("MLflow logger initialized")
+    except Exception as e:
+        logger.error("Failed to initialize MLflow logger", error=str(e))
+        mlflow_logger = None
     
     # Initialize Redis client
     try:
@@ -265,8 +294,8 @@ async def metrics():
 
 
 @app.post("/v1/chat/completions", response_model=ChatResponse)
-async def chat_completions(request: ChatRequest):
-    """OpenAI-compatible chat completions endpoint."""
+async def chat_completions(request: ChatRequest, http_request: Request):
+    """OpenAI-compatible chat completions endpoint with policy enforcement."""
     if not openai_client:
         raise HTTPException(
             status_code=503,
@@ -278,12 +307,21 @@ async def chat_completions(request: ChatRequest):
     
     start_time = asyncio.get_event_loop().time()
     
+    # Get request context for provenance tracking
+    context = get_request_context(http_request)
+    trace_id = context.get("trace_id")
+    run_id = context.get("run_id")
+    policy_set = context.get("policy_set", "default")
+    
     try:
         logger.info(
             "Processing chat request",
             model=request.model,
             message_count=len(request.messages),
             stream=request.stream,
+            trace_id=trace_id,
+            run_id=run_id,
+            policy_set=policy_set,
         )
         
         # Convert to OpenAI format
@@ -302,6 +340,59 @@ async def chat_completions(request: ChatRequest):
         
         duration = asyncio.get_event_loop().time() - start_time
         
+        # Extract output for policy enforcement
+        output_text = ""
+        if response.choices and len(response.choices) > 0:
+            output_text = response.choices[0].message.content or ""
+        
+        # Run policy enforcement
+        policy_verdict = None
+        if output_text and not request.stream:
+            try:
+                policy_verdict = await policy_enforcer.validate(
+                    output=output_text,
+                    retrieval_docs=None,  # TODO: Add retrieval docs from RAG
+                    policy_set=policy_set,
+                )
+                
+                # Log policy verdicts to MLflow
+                if mlflow_logger and trace_id:
+                    try:
+                        import mlflow
+                        with mlflow.start_run(run_name=run_id):
+                            mlflow.set_tag("trace_id", trace_id)
+                            mlflow.set_tag("policy_set", policy_set)
+                            
+                            # Log policy metrics
+                            mlflow.log_metrics({
+                                "policy_overall_score": policy_verdict.overall_score,
+                                "policy_violations": policy_verdict.total_violations,
+                                "policy_suggestions": policy_verdict.total_suggestions,
+                                "policy_passed": int(policy_verdict.overall_passed),
+                            })
+                            
+                            # Log individual policy scores
+                            for policy_name, result in policy_verdict.policy_results.items():
+                                mlflow.log_metric(f"policy_{policy_name}_score", result.score)
+                                mlflow.log_metric(f"policy_{policy_name}_violations", len(result.violations))
+                                
+                    except Exception as e:
+                        logger.error("Failed to log policy verdicts to MLflow", error=str(e))
+                
+                # Set OTel span attributes
+                span = trace.get_current_span()
+                if span and span.is_recording():
+                    span.set_attribute("app.policy_overall_passed", policy_verdict.overall_passed)
+                    span.set_attribute("app.policy_overall_score", policy_verdict.overall_score)
+                    span.set_attribute("app.policy_violations", policy_verdict.total_violations)
+                    
+                    for policy_name, result in policy_verdict.policy_results.items():
+                        span.set_attribute(f"app.policy_{policy_name}_passed", result.passed)
+                        span.set_attribute(f"app.policy_{policy_name}_score", result.score)
+                
+            except Exception as e:
+                logger.error("Policy enforcement failed", error=str(e))
+        
         # Update metrics
         CHAT_REQUESTS.labels(model=request.model, status="success").inc()
         CHAT_DURATION.labels(model=request.model).observe(duration)
@@ -311,7 +402,14 @@ async def chat_completions(request: ChatRequest):
             model=request.model,
             duration=duration,
             usage=response.usage.dict() if response.usage else None,
+            policy_verdict=policy_verdict.dict() if policy_verdict else None,
         )
+        
+        # Add policy verdicts to response if available
+        if policy_verdict:
+            # Add to response headers or metadata
+            response.headers["x-policy-verdict"] = str(policy_verdict.overall_passed)
+            response.headers["x-policy-score"] = str(policy_verdict.overall_score)
         
         return response
         
@@ -327,6 +425,7 @@ async def chat_completions(request: ChatRequest):
             model=request.model,
             error=str(e),
             duration=duration,
+            trace_id=trace_id,
         )
         
         raise HTTPException(status_code=500, detail=f"Chat request failed: {str(e)}")
